@@ -24,15 +24,18 @@ tags: [handoff, delivery]
 ## Decided
 
 - The package is released from `main` only, after `dev` is merged there by the maintainer.
+- Pull request #2 merged into `dev` with both CI jobs green; `main` and `dev` require the `checks`
+  and `mutation` jobs and refuse force pushes and deletion.
 
 ## Open / Remaining
 
-- Review and merge the pull request for #1 into `dev`; CI runs the checks and the mutation sample.
-- A release (`pudu release 0.1.0`) follows once `dev` reaches `main`.
+- Merge `dev` into `main`, which closes #1.
+- Release with `pudu release 0.1.0` from `main`, then confirm `pudu install
+  @chrismichaelps/pudu-lang-mcp@0.1.0` resolves.
 
 ## Exact next action
 
-Review the pull request for #1 against `dev` and merge it once CI is green.
+Open a pull request from `dev` into `main` for the 0.1.0 release.
 
 ## Links
 
