@@ -1,0 +1,102 @@
+/** @Domain.Docs.Chapter.Aggregate — published documents and their sections */
+module PuduLangMcp.Domain.Docs.Chapter
+
+import Std.Char as Char
+import Std.List as List
+import Std.Text as Text
+
+/** @Domain.Docs.Chapter.Chapter — one published document by group */
+export type Chapter = { group: Str, slug: Str, title: Str, markdown: Str }
+
+/** @Domain.Docs.Chapter.Section — a document cut at second-level headings */
+export type Section = { group: Str, chapter: Str, chapterTitle: Str, heading: Str, anchor: Str, text: Str }
+
+/// The heading prefix that starts a section.
+const SECTION_MARK: Str = "## "
+/// The heading prefix of a document's own title, which is not section text.
+const TITLE_MARK: Str = "# "
+
+/// The line prefix that opens and closes a code fence.
+const FENCE_MARK: Str = "```"
+
+/// A document cut into sections at its second-level headings.
+export fn sectionsOf(chapter: &Chapter) -> Array[Section] {
+  var sections: Array[Section] = []
+  var heading = chapter.title
+  var body: Array[Str] = []
+  var fenced = false
+  var opened = false
+  for line in chapter.markdown.split("\n") {
+    if line.startsWith(FENCE_MARK) { fenced = !fenced }
+    if !fenced && line.startsWith(TITLE_MARK) {
+      continue
+    }
+    if !fenced && line.startsWith(SECTION_MARK) {
+      if opened || !Text.isBlank(Text.join(&body, "\n")) {
+        sections = sections.push(section(chapter, heading, &body))
+      }
+      heading = line.drop(SECTION_MARK.length()).trim()
+      body = []
+      opened = true
+    } else {
+      body = body.push(line)
+    }
+  }
+  if opened || !Text.isBlank(Text.join(&body, "\n")) {
+    sections = sections.push(section(chapter, heading, &body))
+  }
+  sections
+}
+
+/// Every section of every document, in corpus order.
+export fn allSections(chapters: &Array[Chapter]) -> Array[Section] {
+  var sections: Array[Section] = []
+  for chapter in *chapters {
+    sections = sections.concat(sectionsOf(&chapter))
+  }
+  sections
+}
+
+/// The address of a heading: lowercase words joined by dashes.
+export fn anchorOf(heading: Str) -> Str {
+  let spaced = heading.toLower().chars().map(|character: Char| if isWordCharacter(character) { Text.singleton(character) } else { " " })
+  Text.join(&Text.words(spaced.join("")), "-")
+}
+
+/// The document with a group and slug.
+export fn find(chapters: &Array[Chapter], group: Str, slug: Str) -> Option[Chapter] {
+  List.find(chapters, |chapter: Chapter| chapter.group == group && chapter.slug == slug)
+}
+
+/// The documents of one group, in corpus order.
+export fn inGroup(chapters: &Array[Chapter], group: Str) -> Array[Chapter] {
+  chapters.filter(|chapter: Chapter| chapter.group == group)
+}
+
+/// The section of a document matching a heading or anchor.
+export fn sectionIn(chapter: &Chapter, wanted: Str) -> Option[Section] {
+  let key = wanted.trim().toLower()
+  List.find(&sectionsOf(chapter), |candidate: Section| candidate.anchor == key || candidate.heading.toLower() == key)
+}
+
+/// One line per document with its sections indented beneath it.
+export fn tableOfContents(chapters: &Array[Chapter]) -> Str {
+  var lines: Array[Str] = []
+  for chapter in *chapters {
+    lines = lines.push(chapter.group + "/" + chapter.slug + " — " + chapter.title)
+    for held in sectionsOf(&chapter) {
+      if held.heading != chapter.title { lines = lines.push("  " + held.heading + " (#" + held.anchor + ")") }
+    }
+  }
+  Text.join(&lines, "\n")
+}
+
+/// A section built from its heading and body lines.
+fn section(chapter: &Chapter, heading: Str, body: &Array[Str]) -> Section {
+  Section{group: chapter.group, chapter: chapter.slug, chapterTitle: chapter.title, heading: heading, anchor: anchorOf(heading), text: Text.join(body, "\n").trim()}
+}
+
+/// Whether a character is kept in an anchor.
+fn isWordCharacter(character: Char) -> Bool {
+  Char.isAlphanumeric(character)
+}

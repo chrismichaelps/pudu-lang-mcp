@@ -1,0 +1,138 @@
+/** @Domain.Lsp.Conversation.Module — one-shot language server conversations */
+module PuduLangMcp.Domain.Lsp.Conversation
+
+import Std.Json as Json
+import Std.Math as Math
+import Std.Text as Text
+import PuduLangMcp.Utils.JsonAccess as Access
+
+/** @Domain.Lsp.Conversation.Question — one question at 1-based position */
+export type Question = { method: Str, line: Int, character: Int, newName: Str, query: Str }
+
+/** @Domain.Lsp.Conversation.Answer — result and diagnostics from a transcript */
+export type Answer = { result: Option[Json.Json], diagnostics: Array[Json.Json], error: Option[Str] }
+
+/// Request id of the handshake.
+const INITIALIZE_ID: Int = 1
+/// Request id of the question.
+const QUESTION_ID: Int = 2
+/// Request id of the goodbye.
+const SHUTDOWN_ID: Int = 3
+/// Completion trigger kind for an explicit request.
+const INVOKED: Int = 1
+/// The header that starts every framed message.
+const HEADER: Str = "Content-Length:"
+/// What ends a message's headers.
+const SEPARATOR: Str = "\r\n\r\n"
+/// The one method asked without an open document.
+const WORKSPACE_SYMBOL: Str = "workspace/symbol"
+/// The notification carrying a document's diagnostics.
+const DIAGNOSTICS: Str = "textDocument/publishDiagnostics"
+
+/// Every framed message of one question, from handshake to exit.
+export fn conversation(rootUri: Str, uri: Str, source: Str, question: &Question) -> Str {
+  var messages = [
+    request(INITIALIZE_ID, "initialize", Json.object(&[
+          ("processId", Json.Null),
+          ("rootUri", Json.Text(rootUri)),
+          ("capabilities", Json.object(&[]))
+        ])),
+    notification("initialized", Json.object(&[]))
+  ]
+  let opens = !(question.method == WORKSPACE_SYMBOL && source.isEmpty())
+  if opens {
+    messages = messages.push(notification("textDocument/didOpen", Json.object(&[
+            ("textDocument", Json.object(&[
+                  ("uri", Json.Text(uri)),
+                  ("languageId", Json.Text("pudu")),
+                  ("version", Json.Number(1)),
+                  ("text", Json.Text(source))
+                ]))
+          ])))
+  }
+  messages = messages.push(request(QUESTION_ID, question.method, params(uri, question)))
+  messages = messages.push(request(SHUTDOWN_ID, "shutdown", Json.Null))
+  messages = messages.push(notification("exit", Json.Null))
+  messages.map(|message: Json.Json| frame(&message)).join("")
+}
+
+/// The question's parameters, with the position made 0-based.
+export fn params(uri: Str, question: &Question) -> Json.Json {
+  if question.method == WORKSPACE_SYMBOL { return Json.object(&[("query", Json.Text(question.query))]) }
+  let document = ("textDocument", Json.object(&[("uri", Json.Text(uri))]))
+  if question.method == "textDocument/documentSymbol" { return Json.object(&[document]) }
+  let at = position(question)
+  if question.method == "textDocument/codeAction" {
+    return Json.object(&[
+        document,
+        ("range", Json.object(&[("start", at), ("end", at)])),
+        ("context", Json.object(&[("diagnostics", Json.list(&[]))]))
+      ])
+  }
+  var fields = [document, ("position", at)]
+  if question.method == "textDocument/references" {
+    fields = fields.push(("context", Json.object(&[("includeDeclaration", Json.Boolean(true))])))
+  }
+  if question.method == "textDocument/completion" {
+    fields = fields.push(("context", Json.object(&[("triggerKind", Json.Number(INVOKED))])))
+  }
+  if question.method == "textDocument/rename" {
+    fields = fields.push(("newName", Json.Text(question.newName)))
+  }
+  Json.object(&fields)
+}
+
+/// The question's answer and the published diagnostics in a transcript.
+export fn answerIn(transcript: Str) -> Answer {
+  var result: Option[Json.Json] = None
+  var error: Option[Str] = None
+  var diagnostics: Array[Json.Json] = []
+  for piece in transcript.split(HEADER) {
+    if let Some(start) = Text.find(piece, SEPARATOR) {
+      match Json.decode(piece.drop(start + SEPARATOR.length()).trim()) {
+        case Ok(message) => {
+          if Access.integer(&message, "id") == Some(QUESTION_ID) {
+            match Access.member(&message, "error") {
+              case Some(problem) => { error = Some(match Access.text(&problem, "message") { case Some(text) => text case None => "the language server refused the request" }) }
+              case None => { result = Some(match Access.member(&message, "result") { case Some(value) => value case None => Json.Null }) }
+            }
+          }
+          if Access.text(&message, "method") == Some(DIAGNOSTICS) {
+            match Json.path(&message, &["params", "diagnostics"]) {
+              case Some(Json.List(items)) => { diagnostics = items }
+              case _ => ()
+            }
+          }
+        }
+        case Err(_) => ()
+      }
+    }
+  }
+  Answer{result: result, diagnostics: diagnostics, error: error}
+}
+
+/// One message with its `Content-Length` header.
+export fn frame(message: &Json.Json) -> Str {
+  let body = Json.encode(message)
+  HEADER + " " + show(body.toBytes().length()) + SEPARATOR + body
+}
+
+/// A 0-based LSP position from the question's 1-based one.
+fn position(question: &Question) -> Json.Json {
+  Json.object(&[("line", Json.Number(Math.max(question.line - 1, 0))), ("character", Json.Number(Math.max(question.character - 1, 0)))])
+}
+
+/// A request message.
+fn request(id: Int, method: Str, parameters: Json.Json) -> Json.Json {
+  Json.object(&[
+      ("jsonrpc", Json.Text("2.0")),
+      ("id", Json.Number(id)),
+      ("method", Json.Text(method)),
+      ("params", parameters)
+    ])
+}
+
+/// A notification message.
+fn notification(method: Str, parameters: Json.Json) -> Json.Json {
+  Json.object(&[("jsonrpc", Json.Text("2.0")), ("method", Json.Text(method)), ("params", parameters)])
+}

@@ -7,10 +7,10 @@ import Std.List as List
 import Std.Option as Option
 import Std.Result as Result
 import Std.Test as Test
-import Constants.Protocol as Protocol
-import Services.Process.Bounded as Bounded
-import Services.Toolchain as Toolchain
-import Utils.JsonAccess as Access
+import PuduLangMcp.Constants.Protocol as Protocol
+import PuduLangMcp.Services.Process.Bounded as Bounded
+import PuduLangMcp.Services.Toolchain as Toolchain
+import PuduLangMcp.Utils.JsonAccess as Access
 
 /// How long the whole session may take.
 const SESSION_MILLIS: Int = 180000

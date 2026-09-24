@@ -1,0 +1,56 @@
+/** @Constants.Protocol.Vocabulary — MCP and JSON-RPC wire literals */
+module PuduLangMcp.Constants.Protocol
+
+/// The per-request protocol version this server serves statelessly.
+export const MODERN_VERSION: Str = "2026-07-28"
+
+/// Handshake-era versions an `initialize` may select, newest first.
+export const LEGACY_VERSIONS: Array[Str] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
+
+/// The version an `initialize` receives when it asks for one not supported.
+export const LATEST_LEGACY_VERSION: Str = "2025-11-25"
+
+/// The `jsonrpc` member every message carries.
+export const JSONRPC_VERSION: Str = "2.0"
+
+/// The member of `params` and of a result that holds protocol metadata.
+export const META_KEY: Str = "_meta"
+/// Metadata key naming the protocol version of one modern request.
+export const META_PROTOCOL_VERSION: Str = "io.modelcontextprotocol/protocolVersion"
+/// Metadata key holding the capabilities a modern client declares per request.
+export const META_CLIENT_CAPABILITIES: Str = "io.modelcontextprotocol/clientCapabilities"
+/// Metadata key under which every result names this server.
+export const META_SERVER_INFO: Str = "io.modelcontextprotocol/serverInfo"
+
+/// The line is not JSON.
+export const PARSE_ERROR: Int = -32700
+/// The JSON is not a valid request or notification.
+export const INVALID_REQUEST: Int = -32600
+/// The method does not exist in the era the request was admitted under.
+export const METHOD_NOT_FOUND: Int = -32601
+/// The parameters are wrong, including a missing resource or cursor.
+export const INVALID_PARAMS: Int = -32602
+/// The server failed while answering.
+export const INTERNAL_ERROR: Int = -32603
+/// The requested protocol version is not one this server speaks.
+export const UNSUPPORTED_PROTOCOL_VERSION: Int = -32022
+
+/// The `resultType` of every final result.
+export const RESULT_COMPLETE: Str = "complete"
+/// Cache scope for results any client may share.
+export const CACHE_PUBLIC: Str = "public"
+/// Cache scope for results that depend on this machine.
+export const CACHE_PRIVATE: Str = "private"
+
+/// `LEGACY_VERSIONS` as a set, for membership tests.
+const LEGACY_SET: Set[Str] = setOf(LEGACY_VERSIONS)
+
+/// Every version this server accepts, modern first.
+export fn supportedVersions() -> Array[Str] {
+  [MODERN_VERSION].concat(LEGACY_VERSIONS)
+}
+
+/// Whether a version is one an `initialize` may select.
+export fn isLegacyVersion(version: Str) -> Bool {
+  LEGACY_SET.contains(version)
+}

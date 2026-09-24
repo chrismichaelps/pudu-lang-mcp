@@ -1,0 +1,90 @@
+/** @App.Tools.Registry.Router — lists tools and routes tool calls */
+module PuduLangMcp.App.Tools.Registry
+
+import Std.Json as Json
+import Std.Map as Map
+import PuduLangMcp.App.Context as Context
+import PuduLangMcp.App.Tools.Compiler as Compiler
+import PuduLangMcp.App.Tools.Docs as Docs
+import PuduLangMcp.App.Tools.Language as Language
+import PuduLangMcp.App.Tools.Reference as Reference
+import PuduLangMcp.App.Tools.Status as Status
+import PuduLangMcp.Constants.Protocol as Protocol
+import PuduLangMcp.Constants.Server as Server
+import PuduLangMcp.Domain.Catalog.Arguments as Arguments
+import PuduLangMcp.Domain.Catalog.ToolSpec as ToolSpec
+import PuduLangMcp.Domain.Catalog.Tools as Tools
+import PuduLangMcp.Domain.Protocol.Pagination as Pagination
+import PuduLangMcp.Domain.Rpc.Reply as Reply
+import PuduLangMcp.Errors.RpcError as RpcError
+import PuduLangMcp.Errors.ToolError as ToolError
+import PuduLangMcp.Utils.JsonAccess as Access
+
+/// Every tool's handler, by tool name.
+export fn handlers() -> Map[Str, fn(&Context.Context, &Arguments.Args) -> Result[Str, ToolError.ToolFailure]] {
+  mapOf([
+      ("pudu_docs_search", Docs.search),
+      ("pudu_docs_read", Docs.read),
+      ("pudu_reference_search", Reference.search),
+      ("pudu_module_reference", Reference.moduleTool),
+      ("pudu_check", Compiler.check),
+      ("pudu_format", Compiler.format),
+      ("pudu_lint", Compiler.lint),
+      ("pudu_run", Compiler.run),
+      ("pudu_test", Compiler.test),
+      ("pudu_hover", Language.hover),
+      ("pudu_definition", Language.definition),
+      ("pudu_references", Language.references),
+      ("pudu_completion", Language.completion),
+      ("pudu_signature_help", Language.signatureHelp),
+      ("pudu_code_actions", Language.codeActions),
+      ("pudu_rename_preview", Language.renamePreview),
+      ("pudu_document_symbols", Language.documentSymbols),
+      ("pudu_workspace_symbols", Language.workspaceSymbols),
+      ("pudu_toolchain", Status.toolchain)
+    ])
+}
+
+/// Answers one page of the tool catalogue.
+export fn list(context: &Context.Context, params: &Json.Json) -> Result[Json.Json, RpcError.ProtocolError] {
+  let cursor = Pagination.cursorOf(params) ?
+  let paged = Pagination.page(&Tools.all(), &cursor, Server.PAGE_SIZE) ?
+  var fields = [("tools", Json.list(&paged[0].map(|spec: ToolSpec.ToolSpec| ToolSpec.toJson(&spec))))]
+  if let Some(next) = paged[1] { fields = fields.push(("nextCursor", Json.Text(next))) }
+  Ok(Reply.complete(&fields, &Reply.Cached(Server.LIST_TTL_MS, Protocol.CACHE_PUBLIC)))
+}
+
+/// Answers one tool call: its result text, or a tool error the model can act on.
+export fn call(context: &Context.Context, params: &Json.Json) -> Result[Json.Json, RpcError.ProtocolError] {
+  let name = match Access.member(params, "name") {
+    case Some(Json.Text(given)) => given
+    case _ => { return Err(RpcError.InvalidParams("name must be a string")) }
+  }
+  let spec = match Tools.find(name) {
+    case Some(found) => found
+    case None => { return Err(RpcError.InvalidParams("Unknown tool: " + name)) }
+  }
+  let handler = match Map.get(&handlers(), name) {
+    case Some(found) => found
+    case None => { return Err(RpcError.Internal("tool " + name + " has no handler")) }
+  }
+  let arguments = match Access.member(params, "arguments") {
+    case Some(given) => given
+    case None => Json.Null
+  }
+  match Arguments.validate(&spec, &arguments) {
+    case Err(failure) => Ok(toolResult(ToolError.explain(&failure), true))
+    case Ok(args) => match handler(context, &args) {
+      case Ok(text) => Ok(toolResult(text, false))
+      case Err(failure) => Ok(toolResult(ToolError.explain(&failure), true))
+    }
+  }
+}
+
+/// A complete tool result carrying one text block.
+export fn toolResult(text: Str, isError: Bool) -> Json.Json {
+  Reply.complete(&[
+      ("content", Json.list(&[Json.object(&[("type", Json.Text("text")), ("text", Json.Text(text))])])),
+      ("isError", Json.Boolean(isError))
+    ], &Reply.NoCache)
+}

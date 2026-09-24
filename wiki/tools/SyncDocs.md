@@ -15,7 +15,7 @@ aliases: [SyncDocs]
 
 ## Purpose
 
-Regenerate [[src/Generated/Docs]] from a pudu-lang checkout: the language guide, the site pages,
+Regenerate [[src/PuduLangMcp/Generated/Docs]] from a pudu-lang checkout: the language guide, the site pages,
 the release notes, and the playground examples ([[decisions/ADR-0002-compiled-documentation]]).
 
 ## Interface
@@ -24,7 +24,7 @@ the release notes, and the playground examples ([[decisions/ADR-0002-compiled-do
 pudu run tools/SyncDocs.pudu <pudu-lang-checkout> [revision]
 ```
 
-Writes `src/Generated/Docs.pudu`. Exit status 0 on success, 1 with a message on stderr
+Writes `src/PuduLangMcp/Generated/Docs.pudu`. Exit status 0 on success, 1 with a message on stderr
 otherwise.
 
 ## Algorithm
@@ -57,4 +57,4 @@ otherwise.
 
 ## Referenced by
 
-[[src/Generated/Docs]]
+[[src/PuduLangMcp/Generated/Docs]]

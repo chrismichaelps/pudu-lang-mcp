@@ -9,7 +9,7 @@ aliases: [Architecture]
 ## Shape
 
 One process, one stdio connection, one message per line. `Main` reads a line, hands it to
-[[src/App/Dispatch|Dispatch]] with the current [[domain/ProtocolEra|session]], writes every
+[[src/PuduLangMcp/App/Dispatch|Dispatch]] with the current [[domain/ProtocolEra|session]], writes every
 reply line it returns, and stops at end of input. Everything between the line and the reply is a
 pure function except the calls made through the [[seams/Toolchain]] record.
 

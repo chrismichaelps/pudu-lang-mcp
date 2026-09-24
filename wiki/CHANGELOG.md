@@ -5,6 +5,16 @@ tags: [changelog]
 
 # Changelog
 
+## 2026-09-24 — Module root ownership (0.1.1)
+
+- Every module the package ships moved under its declared root: `src/PuduLangMcp/**` holds
+  `PuduLangMcp.App`, `.Domain`, `.Services`, `.Utils`, `.Constants`, `.Errors`, and `.Generated`,
+  with suites mirrored under `test/PuduLangMcp/`. In 0.1.0 those modules sat at the top level, and
+  a program with its own `App.Context` stopped compiling once it installed the package.
+- `test/Package/LayoutTest` refuses a shipped module outside the root or misnamed for its path
+  ([[architecture/TESTING]]); the rule is an architectural law in [[grammar/pudu]].
+- The package version is 0.1.1; the mirror is indexed from [[src/PuduLangMcp/_MOC]].
+
 ## 2026-09-23 — Publication baseline
 
 - `pudu.toml` is the canonical library manifest: `@chrismichaelps/pudu-lang-mcp` 0.1.0 with
@@ -15,7 +25,7 @@ tags: [changelog]
   stopping the suite at an index.
 - A bounded run no longer waits on its output readers without limit. Once the child has exited or
   been stopped, the readers have 250 ms to reach the end of their streams; a stream a grandchild
-  keeps open answers what was read and is marked cut ([[src/Services/Process/Bounded]]).
+  keeps open answers what was read and is marked cut ([[src/PuduLangMcp/Services/Process/Bounded]]).
 
 ## 2026-09-23 — Package validation
 

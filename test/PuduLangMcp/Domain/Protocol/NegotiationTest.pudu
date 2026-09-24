@@ -1,0 +1,57 @@
+/** @Test.Domain.Protocol.NegotiationTest.Suite — the era compatibility matrix */
+module PuduLangMcp.Domain.Protocol.NegotiationTest
+
+import Std.Io as Io
+import Std.Json as Json
+import Std.Test as Test
+import PuduLangMcp.Constants.Protocol as Protocol
+import PuduLangMcp.Domain.Protocol.Negotiation as Negotiation
+import PuduLangMcp.Errors.RpcError as RpcError
+
+/// Params carrying modern metadata with a version and, optionally, capabilities.
+fn modern(version: Json.Json, capabilities: Option[Json.Json]) -> Json.Json {
+  var meta = [(Protocol.META_PROTOCOL_VERSION, version)]
+  if let Some(given) = capabilities { meta = meta.push((Protocol.META_CLIENT_CAPABILITIES, given)) }
+  Json.object(&[(Protocol.META_KEY, Json.object(&meta))])
+}
+
+/// The error code a refused admission answers, or 0 when admitted.
+fn codeOf(outcome: &Result[Negotiation.Era, RpcError.ProtocolError]) -> Int {
+  match outcome {
+    case Ok(_) => 0
+    case Err(problem) => RpcError.code(&problem)
+  }
+}
+
+/// Runs the suite.
+fn main() -> Int {
+  let empty = Json.object(&[])
+  let capabilities = Some(Json.object(&[]))
+  let good = modern(Json.Text(Protocol.MODERN_VERSION), capabilities)
+  let legacy = Negotiation.Legacy("2025-06-18")
+  let checks = Test.suite("Domain.Protocol.Negotiation", &[
+      Test.equals("a modern request is admitted as modern", &Negotiation.admit(&Negotiation.Unopened, "tools/list", &good), &Ok(Negotiation.Modern)),
+      Test.equals("a modern request ignores a legacy session", &Negotiation.admit(&legacy, "tools/list", &good), &Ok(Negotiation.Modern)),
+      Test.equals("an unknown version is unsupported", &codeOf(&Negotiation.admit(&Negotiation.Unopened, "tools/list", &modern(Json.Text("1900-01-01"), capabilities))), &Protocol.UNSUPPORTED_PROTOCOL_VERSION),
+      Test.equals("a legacy version in metadata is unsupported", &codeOf(&Negotiation.admit(&Negotiation.Unopened, "tools/list", &modern(Json.Text("2025-11-25"), capabilities))), &Protocol.UNSUPPORTED_PROTOCOL_VERSION),
+      Test.equals("a version differing in case is unsupported", &codeOf(&Negotiation.admit(&Negotiation.Unopened, "x", &modern(Json.Text("2026-07-28 "), capabilities))), &Protocol.UNSUPPORTED_PROTOCOL_VERSION),
+      Test.equals("a non-string version is invalid params", &codeOf(&Negotiation.admit(&Negotiation.Unopened, "x", &modern(Json.Number(2026), capabilities))), &Protocol.INVALID_PARAMS),
+      Test.equals("missing capabilities are invalid params", &codeOf(&Negotiation.admit(&Negotiation.Unopened, "x", &modern(Json.Text(Protocol.MODERN_VERSION), None))), &Protocol.INVALID_PARAMS),
+      Test.equals("non-object capabilities are invalid params", &codeOf(&Negotiation.admit(&Negotiation.Unopened, "x", &modern(Json.Text(Protocol.MODERN_VERSION), Some(Json.list(&[]))))), &Protocol.INVALID_PARAMS),
+      Test.equals("initialize without metadata is legacy at the asked version", &Negotiation.admit(&Negotiation.Unopened, "initialize", &Json.object(&[("protocolVersion", Json.Text("2025-03-26"))])), &Ok(Negotiation.LegacyEra("2025-03-26"))),
+      Test.equals("initialize at an unknown version falls back to the latest legacy", &Negotiation.admit(&Negotiation.Unopened, "initialize", &Json.object(&[("protocolVersion", Json.Text("2030-01-01"))])), &Ok(Negotiation.LegacyEra(Protocol.LATEST_LEGACY_VERSION))),
+      Test.equals("initialize with no version falls back to the latest legacy", &Negotiation.negotiateLegacy(&empty), &Protocol.LATEST_LEGACY_VERSION),
+      Test.equals("initialize may renegotiate inside a legacy session", &Negotiation.admit(&legacy, "initialize", &Json.object(&[("protocolVersion", Json.Text("2024-11-05"))])), &Ok(Negotiation.LegacyEra("2024-11-05"))),
+      Test.equals("a legacy session serves requests without metadata", &Negotiation.admit(&legacy, "tools/list", &empty), &Ok(Negotiation.LegacyEra("2025-06-18"))),
+      Test.equals("an unopened session refuses requests without metadata", &codeOf(&Negotiation.admit(&Negotiation.Unopened, "tools/list", &empty)), &Protocol.INVALID_PARAMS),
+      Test.equals("metadata that is not an object counts as absent", &codeOf(&Negotiation.admit(&Negotiation.Unopened, "tools/list", &Json.object(&[(Protocol.META_KEY, Json.Text("x"))]))), &Protocol.INVALID_PARAMS),
+      Test.equals("a modern initialize is admitted, for dispatch to refuse", &Negotiation.admit(&Negotiation.Unopened, "initialize", &good), &Ok(Negotiation.Modern)),
+      Test.that("initialize is the handshake", Negotiation.isHandshake("initialize")),
+      Test.not("another method is not the handshake", Negotiation.isHandshake("server/discover"))
+    ])
+  let ran = Test.run(&checks)
+  for failure in Test.failuresOf(&ran) {
+    let _reported = Io.writeErrorLine(failure)
+  }
+  Test.report(&ran)
+}

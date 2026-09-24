@@ -1,0 +1,41 @@
+/** @Domain.Protocol.Pagination.Module — opaque cursors over list results */
+module PuduLangMcp.Domain.Protocol.Pagination
+
+import Std.Json as Json
+import Std.Math as Math
+import Std.Text as Text
+import PuduLangMcp.Errors.RpcError as RpcError
+import PuduLangMcp.Utils.JsonAccess as Access
+
+/// What every cursor this server issues begins with.
+const CURSOR_PREFIX: Str = "offset:"
+
+/// The `cursor` parameter, when there is one.
+export fn cursorOf(params: &Json.Json) -> Result[Option[Str], RpcError.ProtocolError] {
+  match Access.member(params, "cursor") {
+    case None => Ok(None)
+    case Some(Json.Text(cursor)) => Ok(Some(cursor))
+    case Some(_) => Err(RpcError.InvalidParams("cursor must be a string"))
+  }
+}
+
+/// One page of a list and the cursor of the next, if any remain.
+export fn page[T](items: &Array[T], cursor: &Option[Str], size: Int) -> Result[(Array[T], Option[Str]), RpcError.ProtocolError] {
+  let start = match cursor {
+    case None => 0
+    case Some(text) => match offsetOf(text, items.length()) {
+      case Some(offset) => offset
+      case None => { return Err(RpcError.InvalidParams("invalid cursor")) }
+    }
+  }
+  let end = Math.min(start + size, items.length())
+  let next = if end < items.length() { Some(CURSOR_PREFIX + show(end)) } else { None }
+  Ok((items.slice(start, end), next))
+}
+
+/// The offset a cursor names, when it is one this server issued.
+fn offsetOf(cursor: Str, length: Int) -> Option[Int] {
+  if !cursor.startsWith(CURSOR_PREFIX) { return None }
+  let offset = Text.countOf(cursor.drop(CURSOR_PREFIX.length())) ?
+  if offset < length { Some(offset) } else { None }
+}

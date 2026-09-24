@@ -28,7 +28,7 @@ page and the compiler disagree, the compiler wins and this page is corrected in 
 ## Imports / Namespaces
 
 - One module per file; the module name is the path under its source root with `/` as `.`:
-  `src/Domain/Rpc/Message.pudu` is `module Domain.Rpc.Message`.
+  `src/PuduLangMcp/Domain/Rpc/Message.pudu` is `module PuduLangMcp.Domain.Rpc.Message`.
 - Every import is qualified and aliased: `import Std.Json as Json`. Nothing is imported implicitly.
 - Suites under `test/` import project modules from `src/` through the manifest's source root.
 
@@ -59,6 +59,9 @@ page and the compiler disagree, the compiler wins and this page is corrected in 
   without starting processes.
 - Failures are values: `Result` with a typed error from `Errors/`. No failure is swallowed
   without a written reason.
+- Every module the package ships is `PuduLangMcp` or lives under `src/PuduLangMcp/`; only the
+  executable entry `Main` sits beside it. A program that installs the package owns every other
+  module name, including the `App` and `Domain` layers `pudu init` gives it.
 
 ## Syntax Rules / Naming
 

@@ -41,7 +41,7 @@ Changes to logic also run mutation testing on the files they touch, and no new m
 without a written reason:
 
 ```bash
-pudu run tools/Mutate.pudu --file src/Domain/Protocol/Pagination.pudu
+pudu run tools/Mutate.pudu --file src/PuduLangMcp/Domain/Protocol/Pagination.pudu
 ```
 
 The documentation corpus is regenerated from a pudu-lang checkout, never edited by hand:
