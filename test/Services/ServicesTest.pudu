@@ -30,6 +30,9 @@ fn main() -> Int {
   let mixed = shell("echo out; echo err >&2; exit 3", "", 5000, 4096)
   let echoed = shell("cat", "line one\nline two", 5000, 4096)
   let slow = shell("sleep 5", "", 200, 4096)
+  let held = shell("echo early; sleep 5; true", "", 200, 4096)
+  let quiet = shell("sleep 5 2>/dev/null; true", "", 200, 4096)
+  let late = shell("echo first; (sleep 0.05; echo second) &", "", 5000, 4096)
   let flood = shell("yes x | head -c 100000", "", 5000, 1000)
   let missing = Bounded.run("/nonexistent/program", &[], "", "", 1000, 1000)
   let accent = ByteSeq.fromText("é")
@@ -67,6 +70,14 @@ fn main() -> Int {
       Test.equals("input reaches the child", &echoed.output, &"line one\nline two"),
       Test.that("a slow child is stopped at its deadline", slow.timedOut && slow.status == -1),
       Test.that("a stopped child costs about its deadline", slow.millis < 3000),
+      Test.that("a grandchild holding the streams does not outlast the deadline", held.timedOut && held.millis < 3000),
+      Test.equals("output written before the deadline is kept", &held.output.trim(), &"early"),
+      Test.that("a stream left open past the grace is marked cut", held.truncated),
+      Test.not("a run whose streams closed is not marked cut", mixed.truncated),
+      Test.that("a silent stream held open alone still ends near the deadline", quiet.timedOut && quiet.millis < 3000),
+      Test.that("one stream left open is enough to mark the run cut", quiet.truncated),
+      Test.equals("a stream that closes within the grace is read to its end", &late.output.trim(), &"first\nsecond"),
+      Test.not("a stream that closes within the grace is not marked cut", late.truncated),
       Test.that("output past the cap is cut and marked", flood.truncated && flood.output.length() == 1000),
       Test.errored("a program that cannot start is an error", &missing),
       Test.equals("a cut inside a character backs off to its start", &Bounded.textWithin(&accent, 1), &("", true)),

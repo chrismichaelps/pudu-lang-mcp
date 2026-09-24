@@ -13,6 +13,9 @@ tags: [changelog]
 - The end-to-end suite reads replies through `List.get`, so a server that writes fewer lines than
   expected, such as one started by an older compiler, reports each failed check by name instead of
   stopping the suite at an index.
+- A bounded run no longer waits on its output readers without limit. Once the child has exited or
+  been stopped, the readers have 250 ms to reach the end of their streams; a stream a grandchild
+  keeps open answers what was read and is marked cut ([[src/Services/Process/Bounded]]).
 
 ## 2026-09-23 — Package validation
 
