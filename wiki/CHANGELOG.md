@@ -5,6 +5,12 @@ tags: [changelog]
 
 # Changelog
 
+## 2026-09-24 — Documentation refreshed from pudu-lang dev (#9)
+
+- The bundled corpus is regenerated at pudu-lang `dev` 645c7113, which corrects the Collections
+  chapter: `items.get(i)` stops the program at a missing position, and `List.get(&items, i)` answers an
+  `Option` ([[src/PuduLangMcp/Generated/Docs]]). A corpus check pins the corrected sentence.
+
 ## 2026-09-24 — Module root ownership (0.1.1)
 
 - Every module the package ships moved under its declared root: `src/PuduLangMcp/**` holds
