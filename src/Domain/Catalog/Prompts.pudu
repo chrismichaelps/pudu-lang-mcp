@@ -1,0 +1,85 @@
+/** @Domain.Catalog.Prompts.Registry — prompt templates and their rendering */
+module Domain.Catalog.Prompts
+
+import Std.Json as Json
+import Std.List as List
+import Std.Text as Text
+import Errors.RpcError as RpcError
+import Utils.JsonAccess as Access
+
+/** @Domain.Catalog.Prompts.PromptArgument — one named prompt input */
+export type PromptArgument = { name: Str, description: Str, required: Bool }
+
+/** @Domain.Catalog.Prompts.PromptSpec — one prompt described once */
+export type PromptSpec = { name: Str, title: Str, description: Str, arguments: Array[PromptArgument] }
+
+/// Language rules and the verification workflow, appended to every prompt.
+export const CONVENTIONS: Str = "Pudu rules that are easy to get wrong:\n- A brace inside a string literal starts interpolation: \"\{name\}\" inserts name. Write \\\{ and \\\} for literal braces.\n- Option and Result helpers are module functions: Option.unwrapOr(value, fallback), never value.unwrapOr(fallback).\n- items.get(i) answers the element and stops the program when i is out of range; List.get(&items, i) answers an Option.\n- Module scope holds only const. Lookup tables are const tables built with mapOf([...]) or setOf([...]).\n- scope, module, and where are keywords and cannot name bindings or fields.\n- Every import is qualified and aliased: import Std.Json as Json.\n\nBefore answering with Pudu code, check it with pudu_check, format it with pudu_format, and lint it with pudu_lint. Look up library functions with pudu_reference_search and pudu_module_reference rather than guessing their names."
+
+/// Every prompt, in listing order.
+export fn all() -> Array[PromptSpec] {
+  [
+    PromptSpec{name: "pudu_write_code", title: "Write Pudu code", description: "Write Pudu code for a task, following the language's conventions and verifying it with the compiler.", arguments: [
+        PromptArgument{name: "task", description: "What the code should do.", required: true}
+      ] },
+    PromptSpec{name: "pudu_fix_diagnostics", title: "Fix Pudu diagnostics", description: "Fix the compiler diagnostics in a piece of Pudu code.", arguments: [
+        PromptArgument{name: "source", description: "The Pudu code.", required: true},
+        PromptArgument{name: "diagnostics", description: "The diagnostics to fix; pudu_check answers them when omitted.", required: false}
+      ] },
+    PromptSpec{name: "pudu_review", title: "Review Pudu code", description: "Review Pudu code for correctness, idiom, and failure handling.", arguments: [
+        PromptArgument{name: "source", description: "The Pudu code to review.", required: true}
+      ] },
+    PromptSpec{name: "pudu_explain", title: "Explain a Pudu topic", description: "Explain a Pudu language topic from its documentation, with an example that compiles.", arguments: [
+        PromptArgument{name: "topic", description: "The topic, such as 'ownership' or 'traits'.", required: true}
+      ] }
+  ]
+}
+
+/// A prompt as `prompts/list` describes it.
+export fn toJson(spec: &PromptSpec) -> Json.Json {
+  Json.object(&[
+      ("name", Json.Text(spec.name)),
+      ("title", Json.Text(spec.title)),
+      ("description", Json.Text(spec.description)),
+      ("arguments", Json.list(&spec.arguments.map(|held: PromptArgument| Json.object(&[
+                ("name", Json.Text(held.name)),
+                ("description", Json.Text(held.description)),
+                ("required", Json.Boolean(held.required))
+              ]))))
+    ])
+}
+
+/// A prompt's description and user message, or why its arguments are refused.
+export fn render(name: Str, arguments: &Json.Json) -> Result[(Str, Str), RpcError.ProtocolError] {
+  let spec = match List.find(&all(), |held: PromptSpec| held.name == name) {
+    case Some(found) => found
+    case None => { return Err(RpcError.InvalidParams("unknown prompt: " + name)) }
+  }
+  var values: Array[(Str, Str)] = []
+  for held in spec.arguments {
+    match Access.member(arguments, held.name) {
+      case Some(Json.Text(text)) => {
+        if held.required && Text.isBlank(text) { return Err(RpcError.InvalidParams("prompt argument '" + held.name + "' must not be empty")) }
+        values = values.push((held.name, text))
+      }
+      case Some(_) => { return Err(RpcError.InvalidParams("prompt argument '" + held.name + "' must be a string")) }
+      case None => {
+        if held.required { return Err(RpcError.InvalidParams("missing prompt argument '" + held.name + "'")) }
+        values = values.push((held.name, ""))
+      }
+    }
+  }
+  let value = |key: Str| match List.lookup(&values, key) { case Some(text) => text case None => "" }
+  let body = if name == "pudu_write_code" {
+    "Write Pudu code for this task:\n\n" + value("task") + "\n\nSearch the documentation with pudu_docs_search when a construct is unfamiliar."
+  } else if name == "pudu_fix_diagnostics" {
+    let given = value("diagnostics")
+    let reported = if given.isEmpty() { "Run pudu_check on it to get the diagnostics." } else { "The diagnostics are:\n\n```\n" + given + "\n```" }
+    "Fix this Pudu code so it compiles without diagnostics:\n\n```pudu\n" + value("source") + "\n```\n\n" + reported + "\n\nExplain each change in one sentence."
+  } else if name == "pudu_review" {
+    "Review this Pudu code. Report correctness problems first, then failure handling (Result and Option use), then idiom, each with the line and a concrete change:\n\n```pudu\n" + value("source") + "\n```"
+  } else {
+    "Explain the Pudu topic '" + value("topic") + "'. Read the relevant documentation with pudu_docs_search and pudu_docs_read first, and end with a short example checked with pudu_check."
+  }
+  Ok((spec.description, body + "\n\n" + CONVENTIONS))
+}

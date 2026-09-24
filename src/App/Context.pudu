@@ -1,0 +1,81 @@
+/** @App.Context.Aggregate — the resources every request handler shares */
+module App.Context
+
+import Std.Concurrent as Concurrent
+import Std.Env as Env
+import Std.Result as Result
+import Std.Sync as Sync
+import Constants.Server as Server
+import Domain.Docs.Chapter as Chapter
+import Domain.Reference.Entry as Entry
+import Errors.ToolError as ToolError
+import Services.Reference as Reference
+import Services.Toolchain as Toolchain
+import Services.Workspace as Workspace
+
+/** @App.Context.IndexState — progress of the background reference index */
+export type IndexState = Building | Ready(Array[Entry.Entry]) | Broken(Str)
+
+/** @App.Context.Context — toolchain, workspace, corpus, and index for handlers */
+export type Context = {
+  toolchain: Toolchain.Toolchain,
+  workspace: Workspace.Workspace,
+  chapters: Array[Chapter.Chapter],
+  sections: Array[Chapter.Section],
+  moduleFiles: Array[Reference.ModuleFile],
+  docsRevision: Str,
+  index: Sync.Cell[IndexState]
+}
+
+/// How often a request waiting for the index looks at it again.
+const INDEX_POLL_MS: Int = 50
+
+/// The context for a toolchain, workspace, and corpus, with the index building in the background.
+export fn create(toolchain: Toolchain.Toolchain, workspace: Workspace.Workspace, chapters: Array[Chapter.Chapter], docsRevision: Str) -> Context {
+  let files = Reference.moduleFiles(toolchain.library, workspace.root)
+  let index = Sync.cell(Building)
+  let context = Context {
+    toolchain: toolchain,
+    workspace: workspace,
+    chapters: chapters,
+    sections: Chapter.allSections(&chapters),
+    moduleFiles: files,
+    docsRevision: docsRevision,
+    index: index
+  }
+  let builder = context.toolchain
+  let target = context.index
+  let started = Concurrent.start(fn() -> () {
+      let state = match Reference.build(&builder, &files) {
+        case Ok(found) => Ready(found)
+        case Err(problem) => Broken(ToolError.explain(&problem))
+      }
+      let _stored = Sync.set(&target, state)
+    })
+  if Result.isErr(&started) {
+    let _stored = Sync.set(&context.index, Broken("The reference index could not be started."))
+  }
+  context
+}
+
+/// The reference index, waiting a bounded time while it is still being built.
+export fn entries(context: &Context) -> Result[Array[Entry.Entry], ToolError.ToolFailure] {
+  let deadline = Env.elapsedMilliseconds() + Server.INDEX_WAIT_MS
+  loop {
+    match Result.unwrapOr(Sync.get(&context.index), Broken("The reference index could not be read.")) {
+      case Ready(found) => { return Ok(found) }
+      case Broken(reason) => { return Err(ToolError.Unavailable(reason)) }
+      case Building => {
+        if indexDeadlineReached(Env.elapsedMilliseconds(), deadline) {
+          return Err(ToolError.Unavailable("The reference index is still being built from the installed toolchain; try again shortly."))
+        }
+        let _slept = Concurrent.sleep(INDEX_POLL_MS)
+      }
+    }
+  }
+}
+
+/// Whether the reference-index wait has reached its deadline.
+export fn indexDeadlineReached(now: Int, deadline: Int) -> Bool {
+  now >= deadline
+}

@@ -1,0 +1,121 @@
+/** @Services.Process.Bounded.Backbone — runs one child within deadline and cap */
+module Services.Process.Bounded
+
+import Std.Bytes as ByteSeq
+import Std.Concurrent as Concurrent
+import Std.Env as Env
+import Std.Math as Math
+import Std.Process as Process
+import Std.Result as Result
+import Std.Sync as Sync
+
+/** @Services.Process.Bounded.Finished — what a bounded child left behind */
+export type Finished = { status: Int, output: Str, errors: Str, timedOut: Bool, truncated: Bool, millis: Int }
+
+/// How often a running child is looked at while it is waited for.
+const POLL_MILLIS: Int = 25
+
+/// The longest byte sequence of one UTF-8 character, less one.
+const MAX_CONTINUATION: Int = 3
+
+/// What a stream holding bytes that are not UTF-8 text is shown as.
+const NOT_TEXT: Str = "[output that is not UTF-8 text]"
+
+/// Runs `program` to its end or its deadline and answers everything it wrote, within the cap.
+export fn run(program: Str, arguments: &Array[Str], input: Str, directory: Str, millis: Int, capBytes: Int) -> Result[Finished, Str] {
+  let started = Env.elapsedMilliseconds()
+  let base = Process.launch(program, arguments)
+  let launch = if directory.isEmpty() { base } else { base.inDirectory(directory) }
+  let running = Process.begin(&launch) ?
+  let output = Sync.cell(ByteSeq.empty())
+  let errors = Sync.cell(ByteSeq.empty())
+  let outputReader = capture(&running, Process.read, &output, capBytes)
+  let errorReader = capture(&running, Process.readErrors, &errors, capBytes)
+  if !input.isEmpty() {
+    let _written = Process.writeText(&running, input)
+  }
+  let _closed = Process.closeInput(&running)
+  let waited = waitFor(&running, started + millis)
+  let _outputJoined = joined(outputReader)
+  let _errorsJoined = joined(errorReader)
+  let ending = waited ?
+  let shownOutput = textWithin(&Result.unwrapOr(Sync.get(&output), ByteSeq.empty()), capBytes)
+  let shownErrors = textWithin(&Result.unwrapOr(Sync.get(&errors), ByteSeq.empty()), capBytes)
+  Ok(Finished {
+      status: ending[0],
+      output: shownOutput[0],
+      errors: shownErrors[0],
+      timedOut: ending[1],
+      truncated: shownOutput[1] || shownErrors[1],
+      millis: Env.elapsedMilliseconds() - started
+    })
+}
+
+/// At most `limit` bytes as text, cut on a character boundary, and whether anything was cut.
+export fn textWithin(written: &Bytes, limit: Int) -> (Str, Bool) {
+  let size = ByteSeq.length(written)
+  let over = size > limit
+  let kept = if over { ByteSeq.take(written, limit) } else { *written }
+  let keptSize = ByteSeq.length(&kept)
+  if keptSize == 0 { return ("", over) }
+  var back = 0
+  let lastBack = Math.min(MAX_CONTINUATION, keptSize - 1)
+  while back <= lastBack {
+    match ByteSeq.toText(&ByteSeq.take(&kept, keptSize - back)) {
+      case Ok(text) => { return (text, over || back > 0) }
+      case Err(_) => { back = back + 1 }
+    }
+  }
+  if over && keptSize <= MAX_CONTINUATION { ("", true) } else { (NOT_TEXT, over) }
+}
+
+/// The child's exit status and whether it was stopped at the deadline.
+fn waitFor(running: &Process.Started, deadline: Int) -> Result[(Int, Bool), Str] {
+  loop {
+    match Process.waitWithin(running, POLL_MILLIS) {
+      case Err(problem) => {
+        let _stopped = Process.stop(running)
+        return Err(problem)
+      }
+      case Ok(Some(status)) => { return Ok((status, false)) }
+      case Ok(None) => {
+        if deadlineReached(Env.elapsedMilliseconds(), deadline) {
+          let _stopped = Process.stop(running)
+          return Ok((-1, true))
+        }
+      }
+    }
+  }
+}
+
+/// Whether a child has reached its execution deadline.
+export fn deadlineReached(now: Int, deadline: Int) -> Bool {
+  now >= deadline
+}
+
+/// Reads one stream to its end on its own thread, keeping at most one byte past `limit`.
+fn capture(running: &Process.Started, next: fn(&Process.Started) -> Result[Option[Bytes], Str], into: &Sync.Cell[Bytes], limit: Int) -> Result[Concurrent.Task, Concurrent.ConcurrentError] {
+  let held = *running
+  let target = *into
+  Concurrent.start(fn() -> () {
+      var kept = ByteSeq.empty()
+      loop {
+        match next(&held) {
+          case Ok(Some(piece)) => {
+            if ByteSeq.length(&kept) <= limit {
+              kept = ByteSeq.take(&ByteSeq.concat(&kept, &piece), limit + 1)
+            }
+          }
+          case Ok(None) => { break }
+          case Err(_) => { break }
+        }
+      }
+      let _stored = Sync.set(&target, kept)
+    })
+}
+
+/// Waits for a reader thread, when it could be started.
+fn joined(reader: Result[Concurrent.Task, Concurrent.ConcurrentError]) -> Result[(), Concurrent.ConcurrentError] {
+  let worker = reader ?
+  Concurrent.join(&worker)
+}

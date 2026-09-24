@@ -1,0 +1,23 @@
+/** @Services.Lsp.Adapter — asks the installed language server once */
+module Services.Lsp
+
+import Constants.Server as Server
+import Domain.Lsp.Conversation as Conversation
+import Errors.ToolError as ToolError
+import Services.Toolchain as Toolchain
+
+/// The command the language server is started with.
+const COMMAND: Str = "pudu lsp"
+
+/// The language server's answer to one question, or why there is none.
+export fn ask(toolchain: &Toolchain.Toolchain, rootUri: Str, uri: Str, source: Str, directory: Str, question: &Conversation.Question) -> Result[Conversation.Answer, ToolError.ToolFailure] {
+  if toolchain.compiler == None { return Err(ToolError.ToolchainMissing) }
+  let said = Conversation.conversation(rootUri, uri, source, question)
+  let done = match toolchain.run(["lsp"], said, directory, Server.LSP_TIMEOUT_MS, Server.OUTPUT_CAP_BYTES) {
+    case Ok(finished) => finished
+    case Err(problem) => { return Err(ToolError.CommandFailed(problem)) }
+  }
+  let answer = Conversation.answerIn(done.output)
+  if answer.result != None || answer.error != None { return Ok(answer) }
+  if done.timedOut { Err(ToolError.TimedOut(COMMAND, Server.LSP_TIMEOUT_MS)) } else { Err(ToolError.Unavailable("The language server ended without answering.")) }
+}

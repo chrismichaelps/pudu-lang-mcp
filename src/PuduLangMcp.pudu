@@ -1,0 +1,31 @@
+/** @PuduLangMcp.Server.Root — serves MCP over stdio until input ends */
+module PuduLangMcp
+
+import Std.Io as Io
+import App.Context as Context
+import App.Dispatch as Dispatch
+import Generated.Docs as Docs
+import Services.Toolchain as Toolchain
+import Services.Workspace as Workspace
+
+/// Serves one client over stdin and stdout; answers the exit status.
+export fn serve() -> Int {
+  let context = Context.create(Toolchain.locate(), Workspace.fromEnvironment(), Docs.CHAPTERS, Docs.REVISION)
+  var state = Dispatch.initial()
+  loop {
+    match Io.readLineOrEnd() {
+      case Ok(Some(line)) => {
+        let answered = Dispatch.respond(&context, &state, line)
+        state = answered[0]
+        for reply in answered[1] {
+          if Io.writeLine(reply) != Ok(()) { return 1 }
+        }
+      }
+      case Ok(None) => { return 0 }
+      case Err(problem) => {
+        let _reported = Io.writeErrorLine("pudu-lang-mcp: cannot read input: " + problem)
+        return 1
+      }
+    }
+  }
+}

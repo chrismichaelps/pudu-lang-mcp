@@ -1,0 +1,156 @@
+/** @Tools.SyncDocs.Generator — compiles published prose into Pudu source */
+module SyncDocs
+
+import Std.Env as Env
+import Std.Io as Io
+import Std.List as List
+import Std.Option as Option
+import Std.Text as Text
+
+/// Where the generated corpus is written.
+const DOCS_OUTPUT: Str = "src/Generated/Docs.pudu"
+/// The first line of the generated module.
+const HEADER: Str = "/** @Generated.Docs.Corpus — published Pudu prose, generated; do not edit */\n"
+
+/// The site pages the website publishes, by slug and source file.
+const PAGES: Array[(Str, Str)] = [
+  ("conduct", "CODE_OF_CONDUCT.md"),
+  ("contributing", "CONTRIBUTING.md"),
+  ("security", "SECURITY.md"),
+  ("community", "website/pages/community.md"),
+  ("privacy", "website/pages/privacy.md"),
+  ("brand", "website/pages/brand.md")
+]
+
+/// One document as it will be written.
+type Document = { group: Str, slug: Str, title: Str, markdown: Str }
+
+/// Regenerates the corpus from a pudu-lang checkout.
+fn main() -> Int {
+  let checkout = match Env.at(0) {
+    case Some(given) => given
+    case None => { return failed("usage: pudu run tools/SyncDocs.pudu <pudu-lang-checkout> [revision]") }
+  }
+  let revision = Option.unwrapOr(Env.at(1), "unknown")
+  var documents: Array[Document] = []
+  match chapters(checkout + "/website/docs") {
+    case Ok(found) => { documents = documents.concat(found) }
+    case Err(problem) => { return failed(problem) }
+  }
+  for page in PAGES {
+    match Io.read(checkout + "/" + page[1]) {
+      case Ok(text) => { documents = documents.push(Document{group: "pages", slug: page[0], title: titleOf(text, page[0]), markdown: text}) }
+      case Err(problem) => { return failed("cannot read " + page[1] + ": " + problem) }
+    }
+  }
+  match releases(checkout) {
+    case Ok(found) => { documents = documents.concat(found) }
+    case Err(problem) => { return failed(problem) }
+  }
+  match examples(checkout + "/website/playground/examples") {
+    case Ok(found) => { documents = documents.concat(found) }
+    case Err(problem) => { return failed(problem) }
+  }
+  let docsModule = HEADER + "module Generated.Docs\n\nimport Domain.Docs.Chapter as Chapter\n\nexport const REVISION: Str = " + literal(revision) + "\n\nexport const CHAPTERS: Array[Chapter.Chapter] = [\n" + documents.map(|held: Document| documentLiteral(&held)).join(",\n") + "\n]\n"
+  match Io.write(DOCS_OUTPUT, docsModule) {
+    case Ok(_) => ()
+    case Err(problem) => { return failed("cannot write " + DOCS_OUTPUT + ": " + problem) }
+  }
+  let _said = Io.writeLine("wrote " + show(documents.length()) + " documents to " + DOCS_OUTPUT)
+  0
+}
+
+/// The language guide chapters.
+fn chapters(directory: Str) -> Result[Array[Document], Str] {
+  let names = sortedWith(directory, ".md") ?
+  var found: Array[Document] = []
+  for name in names {
+    let text = readIn(directory, name) ?
+    let slug = slugOf(name, ".md")
+    found = found.push(Document{group: "docs", slug: slug, title: titleOf(text, slug), markdown: text})
+  }
+  if found.isEmpty() { Err("no documentation chapters in " + directory) } else { Ok(found) }
+}
+
+/// Every release note of every compiler series.
+fn releases(checkout: Str) -> Result[Array[Document], Str] {
+  let series = sortedWith(checkout + "/packages/pudu", "") ?
+  var found: Array[Document] = []
+  for version in series {
+    let directory = checkout + "/packages/pudu/" + version + "/release-notes"
+    if Io.exists(directory) {
+      for name in sortedWith(directory, ".md") ? {
+        let text = readIn(directory, name) ?
+        let number = name.replace(".md", "")
+        found = found.push(Document{group: "releases", slug: number, title: "Pudu " + number, markdown: text})
+      }
+    }
+  }
+  Ok(found)
+}
+
+/// The playground examples as fenced documents.
+fn examples(directory: Str) -> Result[Array[Document], Str] {
+  let names = sortedWith(directory, ".pudu") ?
+  var found: Array[Document] = []
+  for name in names {
+    let code = readIn(directory, name) ?
+    let slug = slugOf(name, ".pudu")
+    let first = Option.unwrapOr(List.first(&code.split("\n")), "")
+    let title = if first.startsWith("// ") { first.drop(3).trim() } else { slug }
+    found = found.push(Document{group: "examples", slug: slug, title: title, markdown: "# " + title + "\n\n```pudu\n" + code.trim() + "\n```\n"})
+  }
+  Ok(found)
+}
+
+/// A directory's file names with a suffix, sorted.
+fn sortedWith(directory: Str, suffix: Str) -> Result[Array[Str], Str] {
+  match Io.list(directory) {
+    case Ok(found) => Ok(List.sortBy(&found.filter(|name: Str| name.endsWith(suffix) && !name.startsWith(".")), fn(left: Str, right: Str) -> Bool { left < right }))
+    case Err(problem) => Err("cannot list " + directory + ": " + problem)
+  }
+}
+
+/// A file's text with carriage returns removed.
+fn readIn(directory: Str, name: Str) -> Result[Str, Str] {
+  match Io.read(directory + "/" + name) {
+    case Ok(text) => Ok(text.replace("\r", ""))
+    case Err(problem) => Err("cannot read " + directory + "/" + name + ": " + problem)
+  }
+}
+
+/// A file name without its extension and ordering prefix.
+fn slugOf(name: Str, extension: Str) -> Str {
+  let stem = Text.stripSuffix(name, extension)
+  let dash = stem.indexOf("-")
+  if dash > 0 && isDigits(stem.take(dash)) { stem.drop(dash + 1) } else { stem }
+}
+
+/// The first top-level heading, or a fallback.
+fn titleOf(text: Str, fallback: Str) -> Str {
+  for line in text.split("\n") {
+    if line.startsWith("# ") { return line.drop(2).trim() }
+  }
+  fallback
+}
+
+/// Whether text is one or more decimal digits.
+fn isDigits(text: Str) -> Bool {
+  !text.isEmpty() && text.chars().filter(|c: Char| c < '0' || c > '9').isEmpty()
+}
+
+/// A document as a Pudu record literal.
+fn documentLiteral(held: &Document) -> Str {
+  "  Chapter.Chapter\{group: " + literal(held.group) + ", slug: " + literal(held.slug) + ", title: " + literal(held.title) + ", markdown: " + literal(held.markdown) + "\}"
+}
+
+/// A Pudu string literal whose value is exactly `text`.
+fn literal(text: Str) -> Str {
+  "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\{", "\\\{").replace("\}", "\\\}").replace("\r", "").replace("\n", "\\n").replace("\t", "\\t") + "\""
+}
+
+/// Reports a failure on stderr and answers exit status 1.
+fn failed(message: Str) -> Int {
+  let _said = Io.writeErrorLine("SyncDocs: " + message)
+  1
+}

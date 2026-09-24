@@ -1,0 +1,33 @@
+/** @Utils.TextBounds.Helper — bounded text and match snippets */
+module Utils.TextBounds
+
+import Std.Math as Math
+import Std.Text as Text
+
+/// Text of at most `limit` characters, with a line saying how much was cut.
+export fn bounded(text: Str, limit: Int) -> Str {
+  let total = text.length()
+  if total <= limit { return text }
+  let kept = text.take(limit)
+  kept + "\n[truncated: " + show(total - kept.length()) + " more characters]"
+}
+
+/// `width` characters around the first match of `needle`, on one line.
+export fn snippet(text: Str, needle: Str, width: Int) -> Str {
+  let flat = singleLine(text)
+  let found = if needle.isEmpty() { None } else { Text.find(flat.toLower(), needle.toLower()) }
+  match found {
+    case None => if flat.length() > width { flat.take(width) + "…" } else { flat }
+    case Some(at) => {
+      let start = Math.max(at - width / 2, 0)
+      let before = if start > 0 { "…" } else { "" }
+      let after = if start + width < flat.length() { "…" } else { "" }
+      before + flat.slice(start, start + width) + after
+    }
+  }
+}
+
+/// Text with line breaks and tabs folded into single spaces.
+export fn singleLine(text: Str) -> Str {
+  Text.join(&Text.words(text.replace("\r", " ").replace("\n", " ").replace("\t", " ")), " ")
+}

@@ -1,0 +1,198 @@
+/** @Test.App.DispatchTest.Suite — the protocol core end to end, scripted toolchain */
+module App.DispatchTest
+
+import Std.Env as Env
+import Std.Fs as Fs
+import Std.Io as Io
+import Std.Json as Json
+import Std.List as List
+import Std.Option as Option
+import Std.Result as Result
+import Std.Test as Test
+import App.Context as Context
+import App.Dispatch as Dispatch
+import Constants.Protocol as Protocol
+import Constants.Server as Server
+import Domain.Protocol.Negotiation as Negotiation
+import Generated.Docs as Docs
+import Services.Process.Bounded as Bounded
+import Services.Toolchain as Toolchain
+import Services.Workspace as Workspace
+import Utils.JsonAccess as Access
+
+/// Compiler answers for the index: one exported module with one declaration.
+fn answer(arguments: Array[Str], input: Str, directory: Str) -> Bounded.Finished {
+  let command = Option.unwrapOr(List.first(&arguments), "")
+  if command == "api" {
+    return Toolchain.finished(0, Json.encode(&Json.object(&[("exports", Json.list(&[Json.object(&[("module", Json.Text("Std.Io")), ("name", Json.Text("read"))])]))])))
+  }
+  if command == "doc" {
+    return Toolchain.finished(0, Json.encode(&Json.object(&[("entries", Json.list(&[Json.object(&[
+                      ("name", Json.Text("read")), ("kind", Json.Text("fn")), ("module", Json.Text("Std.Io")),
+                      ("signature", Json.Text("Str -> Result[Str, Str]")), ("doc", Json.list(&[Json.Text("A file's text.")]))
+                    ])]))])))
+  }
+  Toolchain.finished(0, "ok")
+}
+
+/// Modern request parameters with the required metadata.
+fn modern(fields: &Array[(Str, Json.Json)]) -> Json.Json {
+  Json.object(&fields.push((Protocol.META_KEY, Json.object(&[
+            (Protocol.META_PROTOCOL_VERSION, Json.Text(Protocol.MODERN_VERSION)),
+            (Protocol.META_CLIENT_CAPABILITIES, Json.object(&[]))
+          ]))))
+}
+
+/// One request line.
+fn request(id: Int, method: Str, params: Json.Json) -> Str {
+  Json.encode(&Json.object(&[("jsonrpc", Json.Text("2.0")), ("id", Json.Number(id)), ("method", Json.Text(method)), ("params", params)]))
+}
+
+/// The replies to one line, decoded, and the next state.
+fn send(context: &Context.Context, state: &Dispatch.State, line: Str) -> (Dispatch.State, Array[Json.Json]) {
+  let answered = Dispatch.respond(context, state, line)
+  (answered[0], answered[1].map(|reply: Str| Result.unwrapOr(Json.decode(reply), Json.Null)))
+}
+
+/// The only reply to a line in a fresh state.
+fn only(context: &Context.Context, line: Str) -> Json.Json {
+  let replies = send(context, &Dispatch.initial(), line)[1]
+  if replies.length() == 1 { replies[0] } else { Json.Null }
+}
+
+/// The error code of a reply, or 0.
+fn errorCode(reply: &Json.Json) -> Int {
+  Option.unwrapOr(Access.pathInt(reply, &["error", "code"]), 0)
+}
+
+/// Runs the suite.
+fn main() -> Int {
+  let library = Result.unwrapOr(Fs.temporaryDirectoryIn(Env.temporaryDirectory(), "pudu-mcp-lib-"), "/nonexistent")
+  let _made = Io.makeDirectory(library + "/Std")
+  let _written = Io.write(library + "/Std/Io.pudu", "module Std.Io\n")
+  var extra = 0
+  while extra < 101 {
+    let _module = Io.write(library + "/Std/M" + show(extra) + ".pudu", "module Std.M" + show(extra) + "\n")
+    extra = extra + 1
+  }
+  let context = Context.create(Toolchain.scripted("0.1.1", Some(library), answer), Workspace.at(library), Docs.CHAPTERS, "test")
+  let discover = only(&context, request(1, "server/discover", modern(&[])))
+  let unopened = only(&context, request(2, "tools/list", Json.object(&[])))
+  let opened = send(&context, &Dispatch.initial(), request(3, "initialize", Json.object(&[("protocolVersion", Json.Text("2025-06-18")), ("capabilities", Json.object(&[]))])))
+  let legacy = opened[0]
+  let legacyList = send(&context, &legacy, request(4, "tools/list", Json.object(&[])))[1]
+  let legacyPing = send(&context, &legacy, request(5, "ping", Json.object(&[])))[1]
+  let reopened = send(&context, &legacy, request(6, "initialize", Json.object(&[("protocolVersion", Json.Text("2024-11-05"))])))[0]
+  let modernInitialize = only(&context, request(7, "initialize", modern(&[])))
+  let modernPing = only(&context, request(8, "ping", modern(&[])))
+  let unknownMethod = only(&context, request(9, "tools/destroy", modern(&[])))
+  let unsupported = only(&context, Json.encode(&Json.object(&[("jsonrpc", Json.Text("2.0")), ("id", Json.Number(10)), ("method", Json.Text("tools/list")), ("params", Json.object(&[(Protocol.META_KEY, Json.object(&[(Protocol.META_PROTOCOL_VERSION, Json.Text("1900-01-01")), (Protocol.META_CLIENT_CAPABILITIES, Json.object(&[]))]))]))])))
+  let notification = send(&context, &Dispatch.initial(), Json.encode(&Json.object(&[("jsonrpc", Json.Text("2.0")), ("method", Json.Text("notifications/cancelled")), ("params", Json.object(&[("requestId", Json.Number(1))]))])))[1]
+  let clientResponse = send(&context, &Dispatch.initial(), "\{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\{\}\}")[1]
+  let blank = send(&context, &Dispatch.initial(), "   ")[1]
+  let oversized = only(&context, "\"" + "x".repeat(Server.MAX_LINE_BYTES) + "\"")
+  let prefix = "\{\"jsonrpc\":\"2.0\",\"id\":40,\"method\":\"tools/list\",\"pad\":\""
+  let exact = only(&context, prefix + "x".repeat(Server.MAX_LINE_BYTES - prefix.length() - 2) + "\"\}")
+  let resourceWrongUri = only(&context, request(41, "completion/complete", modern(&[("ref", Json.object(&[("type", Json.Text("ref/resource")), ("uri", Json.Text("pudu://docs/\{slug\}"))])), ("argument", Json.object(&[("name", Json.Text("module")), ("value", Json.Text("Std"))]))])))
+  let resourceWrongArgument = only(&context, request(42, "completion/complete", modern(&[("ref", Json.object(&[("type", Json.Text("ref/resource")), ("uri", Json.Text("pudu://reference/\{module\}"))])), ("argument", Json.object(&[("name", Json.Text("topic")), ("value", Json.Text("Std"))]))])))
+  let promptWrongArgument = only(&context, request(43, "completion/complete", modern(&[("ref", Json.object(&[("type", Json.Text("ref/prompt")), ("name", Json.Text("pudu_explain"))])), ("argument", Json.object(&[("name", Json.Text("module")), ("value", Json.Text("o"))]))])))
+  let promptAsResource = only(&context, request(44, "completion/complete", modern(&[("ref", Json.object(&[("type", Json.Text("ref/resource")), ("name", Json.Text("pudu_explain"))])), ("argument", Json.object(&[("name", Json.Text("topic")), ("value", Json.Text("o"))]))])))
+  let manyModules = only(&context, request(45, "completion/complete", modern(&[("ref", Json.object(&[("type", Json.Text("ref/resource")), ("uri", Json.Text("pudu://reference/\{module\}"))])), ("argument", Json.object(&[("name", Json.Text("module")), ("value", Json.Text(""))]))])))
+  let rootless = only(&context, request(46, "resources/read", modern(&[("uri", Json.Text("pudu:///errors"))])))
+  let noSlash = only(&context, request(48, "resources/read", modern(&[("uri", Json.Text("pudu://noslash"))])))
+  let examples = only(&context, request(47, "tools/call", modern(&[("name", Json.Text("pudu_docs_search")), ("arguments", Json.object(&[("query", Json.Text("hello")), ("group", Json.Text("examples"))]))])))
+  let unknownTool = only(&context, request(11, "tools/call", modern(&[("name", Json.Text("pudu_nope"))])))
+  let nameless = only(&context, request(12, "tools/call", modern(&[("name", Json.Number(1))])))
+  let badArguments = only(&context, request(13, "tools/call", modern(&[("name", Json.Text("pudu_docs_search")), ("arguments", Json.object(&[("limit", Json.Number(3))]))])))
+  let searched = only(&context, request(14, "tools/call", modern(&[("name", Json.Text("pudu_docs_search")), ("arguments", Json.object(&[("query", Json.Text("ownership"))]))])))
+  let firstPage = only(&context, request(15, "resources/list", modern(&[])))
+  let cursor = Option.unwrapOr(Access.pathText(&firstPage, &["result", "nextCursor"]), "")
+  let secondPage = only(&context, request(16, "resources/list", modern(&[("cursor", Json.Text(cursor))])))
+  let badCursor = only(&context, request(17, "resources/list", modern(&[("cursor", Json.Text("offset:9999"))])))
+  let index = only(&context, request(18, "resources/read", modern(&[("uri", Json.Text("pudu://docs/index"))])))
+  let chapter = only(&context, request(19, "resources/read", modern(&[("uri", Json.Text("pudu://docs/errors"))])))
+  let missing = only(&context, request(20, "resources/read", modern(&[("uri", Json.Text("pudu://docs/nope"))])))
+  let foreign = only(&context, request(21, "resources/read", modern(&[("uri", Json.Text("file:///etc/passwd"))])))
+  let reference = only(&context, request(22, "resources/read", modern(&[("uri", Json.Text("pudu://reference/Std.Io"))])))
+  let unknownReference = only(&context, request(23, "resources/read", modern(&[("uri", Json.Text("pudu://reference/Std.Nope"))])))
+  let templates = only(&context, request(24, "resources/templates/list", modern(&[])))
+  let prompts = only(&context, request(25, "prompts/list", modern(&[])))
+  let prompt = only(&context, request(26, "prompts/get", modern(&[("name", Json.Text("pudu_explain")), ("arguments", Json.object(&[("topic", Json.Text("traits"))]))])))
+  let promptMissing = only(&context, request(27, "prompts/get", modern(&[("name", Json.Text("pudu_explain"))])))
+  let completeModule = only(&context, request(28, "completion/complete", modern(&[("ref", Json.object(&[("type", Json.Text("ref/resource")), ("uri", Json.Text("pudu://reference/\{module\}"))])), ("argument", Json.object(&[("name", Json.Text("module")), ("value", Json.Text("std.i"))]))])))
+  let completeTopic = only(&context, request(29, "completion/complete", modern(&[("ref", Json.object(&[("type", Json.Text("ref/prompt")), ("name", Json.Text("pudu_explain"))])), ("argument", Json.object(&[("name", Json.Text("topic")), ("value", Json.Text("own"))]))])))
+  let completeNothing = only(&context, request(30, "completion/complete", modern(&[("ref", Json.object(&[("type", Json.Text("ref/prompt")), ("name", Json.Text("pudu_review"))])), ("argument", Json.object(&[("name", Json.Text("source")), ("value", Json.Text(""))]))])))
+  let completeBad = only(&context, request(31, "completion/complete", modern(&[("ref", Json.object(&[]))])))
+  let referenceSearch = only(&context, request(32, "tools/call", modern(&[("name", Json.Text("pudu_reference_search")), ("arguments", Json.object(&[("query", Json.Text("read"))]))])))
+  let _cleaned = Fs.removeTree(library)
+  let checks = Test.suite("App.Dispatch", &[
+      Test.equals("discovery lists the supported versions", &Json.path(&discover, &["result", "supportedVersions"]), &Some(Json.list(&Protocol.supportedVersions().map(|v: Str| Json.Text(v))))),
+      Test.equals("discovery is cacheable", &Access.pathText(&discover, &["result", "cacheScope"]), &Some("public")),
+      Test.equals("discovery names the server", &Access.pathText(&discover, &["result", "_meta", Protocol.META_SERVER_INFO, "name"]), &Some(Server.SERVER_NAME)),
+      Test.equals("a request before initialize without metadata is refused", &errorCode(&unopened), &Protocol.INVALID_PARAMS),
+      Test.equals("initialize answers the negotiated version", &Access.pathText(&opened[1][0], &["result", "protocolVersion"]), &Some("2025-06-18")),
+      Test.equals("initialize answers server info", &Access.pathText(&opened[1][0], &["result", "serverInfo", "version"]), &Some(Server.SERVER_VERSION)),
+      Test.equals("initialize opens a legacy session", &legacy.session, &Negotiation.Legacy("2025-06-18")),
+      Test.that("a legacy session serves requests without metadata", Json.path(&legacyList[0], &["result", "tools"]) != None),
+      Test.equals("a legacy ping answers an empty result", &Access.pathText(&legacyPing[0], &["result", "resultType"]), &Some("complete")),
+      Test.equals("a second initialize renegotiates", &reopened.session, &Negotiation.Legacy("2024-11-05")),
+      Test.equals("a modern initialize is not a method", &errorCode(&modernInitialize), &Protocol.METHOD_NOT_FOUND),
+      Test.equals("a modern ping is not a method", &errorCode(&modernPing), &Protocol.METHOD_NOT_FOUND),
+      Test.equals("an unknown method is not found", &errorCode(&unknownMethod), &Protocol.METHOD_NOT_FOUND),
+      Test.equals("an unsupported version is refused with its code", &errorCode(&unsupported), &Protocol.UNSUPPORTED_PROTOCOL_VERSION),
+      Test.equals("a notification is never answered", &notification.length(), &0),
+      Test.equals("a client response is never answered", &clientResponse.length(), &0),
+      Test.equals("a blank line is never answered", &blank.length(), &0),
+      Test.equals("an oversized line is refused unparsed", &errorCode(&oversized), &Protocol.INVALID_REQUEST),
+      Test.equals("an oversized line is answered with a null id", &Access.member(&oversized, "id"), &Some(Json.Null)),
+      Test.equals("a line of exactly the limit is parsed", &errorCode(&exact), &Protocol.INVALID_PARAMS),
+      Test.equals("a completion for another template answers none", &Access.pathInt(&resourceWrongUri, &["result", "completion", "total"]), &Some(0)),
+      Test.equals("a completion for another template argument answers none", &Access.pathInt(&resourceWrongArgument, &["result", "completion", "total"]), &Some(0)),
+      Test.equals("a completion for another prompt argument answers none", &Access.pathInt(&promptWrongArgument, &["result", "completion", "total"]), &Some(0)),
+      Test.equals("a prompt name under a resource reference answers none", &Access.pathInt(&promptAsResource, &["result", "completion", "total"]), &Some(0)),
+      Test.equals("completion answers at most one hundred values", &Access.pathInt(&manyModules, &["result", "completion", "total"]), &Some(102)),
+      Test.equals("completion says more values exist", &Json.path(&manyModules, &["result", "completion", "hasMore"]), &Some(Json.Boolean(true))),
+      Test.equals("completion says when every value was answered", &Json.path(&completeTopic, &["result", "completion", "hasMore"]), &Some(Json.Boolean(false))),
+      Test.equals("a document address needs a group", &errorCode(&rootless), &Protocol.INVALID_PARAMS),
+      Test.equals("a document address needs a slash", &errorCode(&noSlash), &Protocol.INVALID_PARAMS),
+      Test.that("a group limits the search to its documents", Json.encode(&examples).contains("1. examples/") && !Json.encode(&examples).contains(". docs/")),
+      Test.that("search hits are numbered in order", Json.encode(&searched).contains("\\n2. docs/")),
+      Test.equals("an unknown tool is invalid params", &errorCode(&unknownTool), &Protocol.INVALID_PARAMS),
+      Test.equals("a non-string tool name is invalid params", &errorCode(&nameless), &Protocol.INVALID_PARAMS),
+      Test.equals("invalid arguments are a tool error, not a protocol error", &Json.path(&badArguments, &["result", "isError"]), &Some(Json.Boolean(true))),
+      Test.that("a tool error names the missing argument", Json.encode(&badArguments).contains("Missing required argument 'query'")),
+      Test.equals("a working tool is not an error", &Json.path(&searched, &["result", "isError"]), &Some(Json.Boolean(false))),
+      Test.that("resources are paged", !cursor.isEmpty()),
+      Test.equals("the next page has no further cursor", &Access.pathText(&secondPage, &["result", "nextCursor"]), &None),
+      Test.equals("a cursor past the end is invalid params", &errorCode(&badCursor), &Protocol.INVALID_PARAMS),
+      Test.that("the index resource lists documents", Option.unwrapOr(textOfContents(&index), "").contains("docs/errors")),
+      Test.that("a document resource is its Markdown", Option.unwrapOr(textOfContents(&chapter), "").startsWith("# ")),
+      Test.equals("an unknown document is invalid params", &errorCode(&missing), &Protocol.INVALID_PARAMS),
+      Test.equals("an unknown document names its uri", &Access.pathText(&missing, &["error", "data", "uri"]), &Some("pudu://docs/nope")),
+      Test.equals("a foreign scheme is not a resource", &errorCode(&foreign), &Protocol.INVALID_PARAMS),
+      Test.that("a module reference comes from the toolchain", Option.unwrapOr(textOfContents(&reference), "").contains("fn Std.Io.read :: Str -> Result[Str, Str]")),
+      Test.equals("a module reference is private to this machine", &Access.pathText(&reference, &["result", "cacheScope"]), &Some("private")),
+      Test.equals("an unknown module reference is not found", &errorCode(&unknownReference), &Protocol.INVALID_PARAMS),
+      Test.that("the reference template is listed", Json.encode(&templates).contains("pudu://reference/\{module\}")),
+      Test.that("prompts are listed", Json.encode(&prompts).contains("pudu_write_code")),
+      Test.that("a prompt renders its topic", Json.encode(&prompt).contains("traits")),
+      Test.equals("a prompt missing its argument is invalid params", &errorCode(&promptMissing), &Protocol.INVALID_PARAMS),
+      Test.equals("module names complete by prefix", &Json.path(&completeModule, &["result", "completion", "values"]), &Some(Json.list(&[Json.Text("Std.Io")]))),
+      Test.equals("topics complete from the guide", &Json.path(&completeTopic, &["result", "completion", "values"]), &Some(Json.list(&[Json.Text("ownership")]))),
+      Test.equals("an argument without completions answers none", &Access.pathInt(&completeNothing, &["result", "completion", "total"]), &Some(0)),
+      Test.equals("a malformed completion is invalid params", &errorCode(&completeBad), &Protocol.INVALID_PARAMS),
+      Test.that("the reference index answers searches", Json.encode(&referenceSearch).contains("Std.Io.read"))
+    ])
+  let ran = Test.run(&checks)
+  for failure in Test.failuresOf(&ran) {
+    let _reported = Io.writeErrorLine(failure)
+  }
+  Test.report(&ran)
+}
+
+/// The text of a resource read's first content.
+fn textOfContents(reply: &Json.Json) -> Option[Str] {
+  let contents = Json.path(reply, &["result", "contents"]) ?
+  let first = Json.at(&contents, 0) ?
+  Access.text(&first, "text")
+}
