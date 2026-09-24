@@ -70,6 +70,25 @@ of this shape:
 | `PUDU_BIN` | The `pudu` executable to use | the first `pudu` on `PATH` |
 | `PUDU_LIB` | The standard library to read the reference from | the one installed beside `pudu` |
 
+### As a package
+
+The server is also the package `@chrismichaelps/pudu-lang-mcp`. Every module it ships is under
+`PuduLangMcp`, so it never takes a module name from the program that installs it:
+
+```bash
+pudu install @chrismichaelps/pudu-lang-mcp
+```
+
+```pudu
+module Main
+
+import PuduLangMcp
+
+fn main() -> Int {
+  PuduLangMcp.serve()
+}
+```
+
 ## Developing
 
 ```bash

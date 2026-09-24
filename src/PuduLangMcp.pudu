@@ -2,11 +2,11 @@
 module PuduLangMcp
 
 import Std.Io as Io
-import App.Context as Context
-import App.Dispatch as Dispatch
-import Generated.Docs as Docs
-import Services.Toolchain as Toolchain
-import Services.Workspace as Workspace
+import PuduLangMcp.App.Context as Context
+import PuduLangMcp.App.Dispatch as Dispatch
+import PuduLangMcp.Generated.Docs as Docs
+import PuduLangMcp.Services.Toolchain as Toolchain
+import PuduLangMcp.Services.Workspace as Workspace
 
 /// Serves one client over stdin and stdout; answers the exit status.
 export fn serve() -> Int {

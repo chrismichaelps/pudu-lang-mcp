@@ -5,7 +5,7 @@ to_role: Architect
 tags: [handoff, delivery]
 ---
 
-# Initial package publication
+# Package publication
 
 ## Done
 
@@ -23,19 +23,20 @@ tags: [handoff, delivery]
 
 ## Decided
 
-- The package is released from `main` only, after `dev` is merged there by the maintainer.
-- Pull request #2 merged into `dev` with both CI jobs green; `main` and `dev` require the `checks`
-  and `mutation` jobs and refuse force pushes and deletion.
+- The package is released from `main` only.
+- 0.1.0 was released and installs, but its modules sat beside the root and collided with a
+  consumer's own `App` and `Domain` modules. #5 moves them under `PuduLangMcp` for 0.1.1.
+- `main` and `dev` require the `checks` and `mutation` jobs and refuse force pushes and deletion.
 
 ## Open / Remaining
 
-- Merge `dev` into `main`, which closes #1.
-- Release with `pudu release 0.1.0` from `main`, then confirm `pudu install
-  @chrismichaelps/pudu-lang-mcp@0.1.0` resolves.
+- Merge the #5 pull request into `dev`, then `dev` into `main`.
+- Release 0.1.1 with `pudu release 0.1.1`, create its GitHub release, and confirm a consumer with
+  its own `App.Context` installs and serves `@chrismichaelps/pudu-lang-mcp@0.1.1`.
 
 ## Exact next action
 
-Open a pull request from `dev` into `main` for the 0.1.0 release.
+Merge the pull request for #5 into `dev` once CI is green.
 
 ## Links
 

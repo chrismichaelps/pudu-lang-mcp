@@ -30,7 +30,7 @@ export fn serve() -> Int
 
 ### Linkage
 
-- **Requires:** [[src/App/Context]], [[src/App/Dispatch]], [[src/Services/Toolchain]], [[src/Services/Workspace]], [[src/Generated/Docs]], `Std.Io`.
+- **Requires:** [[src/PuduLangMcp/App/Context]], [[src/PuduLangMcp/App/Dispatch]], [[src/PuduLangMcp/Services/Toolchain]], [[src/PuduLangMcp/Services/Workspace]], [[src/PuduLangMcp/Generated/Docs]], `Std.Io`.
 - **Consumed by:** [[src/Main]].
 
 ## Algorithm

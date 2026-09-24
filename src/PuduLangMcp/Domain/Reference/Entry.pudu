@@ -1,0 +1,91 @@
+/** @Domain.Reference.Entry.Aggregate — public declarations and name search */
+module PuduLangMcp.Domain.Reference.Entry
+
+import Std.List as List
+import Std.Text as Text
+
+/** @Domain.Reference.Entry.Entry — one public declaration */
+export type Entry = { moduleName: Str, kind: Str, name: Str, signature: Str, doc: Str }
+
+/** @Domain.Reference.Entry.Found — a ranked declaration match */
+export type Found = { entry: Entry, score: Int }
+
+/// Score of an exact name or qualified-name match.
+const EXACT: Int = 100
+/// Score when the name starts with the query.
+const NAME_PREFIX: Int = 60
+/// Score when the qualified name contains the query.
+const QUALIFIED_CONTAINS: Int = 45
+/// Score when the name contains the query.
+const NAME_CONTAINS: Int = 40
+/// Score when the signature contains the query.
+const SIGNATURE_CONTAINS: Int = 25
+/// Score when the documentation contains the query.
+const DOC_CONTAINS: Int = 10
+/// Added to a matching function, which is what most lookups want.
+const FUNCTION_BONUS: Int = 5
+
+/// Every module named by the entries, sorted.
+export fn modules(entries: &Array[Entry]) -> Array[Str] {
+  var seen: Set[Str] = setOf([])
+  var names: Array[Str] = []
+  for entry in *entries {
+    if !seen.contains(entry.moduleName) {
+      seen = seen.insert(entry.moduleName)
+      names = names.push(entry.moduleName)
+    }
+  }
+  List.sorted(&names)
+}
+
+/// The entries of one module, in catalogue order.
+export fn ofModule(entries: &Array[Entry], moduleName: Str) -> Array[Entry] {
+  entries.filter(|entry: Entry| entry.moduleName == moduleName)
+}
+
+/// One declaration with its signature and indented documentation.
+export fn render(entry: &Entry) -> Str {
+  let head = if entry.signature.isEmpty() { entry.kind + " " + entry.moduleName + "." + entry.name } else { entry.kind + " " + entry.moduleName + "." + entry.name + " :: " + entry.signature }
+  if entry.doc.isEmpty() { head } else { head + "\n    " + entry.doc.replace("\n", "\n    ") }
+}
+
+/// Every declaration of one module; empty when the module is unknown.
+export fn renderModule(entries: &Array[Entry], moduleName: Str) -> Str {
+  let held = ofModule(entries, moduleName)
+  if held.isEmpty() { return "" }
+  "module " + moduleName + " — " + show(held.length()) + " public declarations\n\n" + Text.join(&held.map(|entry: Entry| render(&entry)), "\n\n")
+}
+
+/// The best-matching declarations, highest score first.
+export fn search(entries: &Array[Entry], query: Str, limit: Int) -> Array[Found] {
+  let wanted = query.trim().toLower()
+  if wanted.isEmpty() { return [] }
+  var ranked: Array[Found] = []
+  for entry in *entries {
+    let points = score(&entry, wanted)
+    if points > 0 { ranked = ranked.push(Found{entry: entry, score: points}) }
+  }
+  List.take(&List.sortOn(&ranked, |held: Found| 0 - held.score), limit)
+}
+
+/// How well one entry matches a lowercased query; zero for no match.
+fn score(entry: &Entry, wanted: Str) -> Int {
+  let name = entry.name.toLower()
+  let qualified = entry.moduleName.toLower() + "." + name
+  let best = if name == wanted || qualified == wanted {
+    EXACT
+  } else if name.startsWith(wanted) {
+    NAME_PREFIX
+  } else if qualified.contains(wanted) {
+    QUALIFIED_CONTAINS
+  } else if name.contains(wanted) {
+    NAME_CONTAINS
+  } else if entry.signature.toLower().contains(wanted) {
+    SIGNATURE_CONTAINS
+  } else if entry.doc.toLower().contains(wanted) {
+    DOC_CONTAINS
+  } else {
+    0
+  }
+  if best > 0 && entry.kind.startsWith("fn") { best + FUNCTION_BONUS } else { best }
+}

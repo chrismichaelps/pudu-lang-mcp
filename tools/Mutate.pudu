@@ -8,8 +8,8 @@ import Std.List as List
 import Std.Option as Option
 import Std.Result as Result
 import Std.Text as Text
-import Services.Process.Bounded as Bounded
-import Services.Toolchain as Toolchain
+import PuduLangMcp.Services.Process.Bounded as Bounded
+import PuduLangMcp.Services.Toolchain as Toolchain
 
 /** @Tools.Mutate.Mutant — one single-point change to one file */
 type Mutant = { file: Str, line: Int, column: Int, from: Str, to: Str }
@@ -30,7 +30,7 @@ const RUN_CAP_BYTES: Int = 1048576
 const EXCLUDED: Array[Str] = ["src/Main.pudu"]
 
 /// The directory of generated code, which is never mutated.
-const GENERATED: Str = "src/Generated/"
+const GENERATED: Str = "src/PuduLangMcp/Generated/"
 
 /// Runs the harness and answers 0, or 1 when the score is below the threshold.
 fn main() -> Int {

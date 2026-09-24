@@ -1,0 +1,67 @@
+/** @Test.Domain.Lsp.ConversationTest.Suite — framing and transcript reading */
+module PuduLangMcp.Domain.Lsp.ConversationTest
+
+import Std.Io as Io
+import Std.Json as Json
+import Std.Test as Test
+import PuduLangMcp.Domain.Lsp.Conversation as Conversation
+import PuduLangMcp.Utils.JsonAccess as Access
+
+/// A question at a 1-based position.
+fn question(method: Str, line: Int, character: Int) -> Conversation.Question {
+  Conversation.Question{method: method, line: line, character: character, newName: "renamed", query: "dou"}
+}
+
+/// A framed message as a server would write it.
+fn framed(body: Str) -> Str {
+  "Content-Length: " + show(body.toBytes().length()) + "\r\n\r\n" + body
+}
+
+/// Runs the suite.
+fn main() -> Int {
+  let hover = Conversation.params("file:///a.pudu", &question("textDocument/hover", 3, 5))
+  let references = Conversation.params("file:///a.pudu", &question("textDocument/references", 1, 1))
+  let rename = Conversation.params("file:///a.pudu", &question("textDocument/rename", 1, 1))
+  let action = Conversation.params("file:///a.pudu", &question("textDocument/codeAction", 2, 2))
+  let symbols = Conversation.params("file:///a.pudu", &question("workspace/symbol", 1, 1))
+  let outline = Conversation.params("file:///a.pudu", &question("textDocument/documentSymbol", 1, 1))
+  let clamped = Conversation.params("file:///a.pudu", &question("textDocument/hover", 0, -4))
+  let said = Conversation.conversation("file:///", "file:///a.pudu", "module A", &question("textDocument/hover", 1, 1))
+  let symbolsWithSource = Conversation.conversation("file:///", "file:///a.pudu", "module A", &question("workspace/symbol", 1, 1))
+  let completing = Conversation.params("file:///a.pudu", &question("textDocument/completion", 1, 1))
+  let origin = Conversation.params("file:///a.pudu", &question("textDocument/hover", 0, 0))
+  let unopened = Conversation.conversation("file:///", "", "", &question("workspace/symbol", 1, 1))
+  let transcript = framed("\{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\{\}\}") + framed("\{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":\{\"diagnostics\":[\{\"message\":\"m\"\}]\}\}") + framed("\{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":\{\"contents\":\"é\"\}\}") + framed("garbage")
+  let answer = Conversation.answerIn(transcript)
+  let refused = Conversation.answerIn(framed("\{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":\{\"code\":-32601,\"message\":\"no such method\"\}\}"))
+  let silent = Conversation.answerIn(framed("\{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\{\}\}"))
+  let nulled = Conversation.answerIn(framed("\{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":null\}"))
+  let checks = Test.suite("Domain.Lsp.Conversation", &[
+      Test.equals("positions become 0-based", &Access.pathInt(&hover, &["position", "line"]), &Some(2)),
+      Test.equals("characters become 0-based", &Access.pathInt(&hover, &["position", "character"]), &Some(4)),
+      Test.equals("positions below 1 clamp to 0", &(Access.pathInt(&clamped, &["position", "line"]), Access.pathInt(&clamped, &["position", "character"])), &(Some(0), Some(0))),
+      Test.equals("references include the declaration", &Json.path(&references, &["context", "includeDeclaration"]), &Some(Json.Boolean(true))),
+      Test.equals("a rename carries the new name", &Access.text(&rename, "newName"), &Some("renamed")),
+      Test.equals("a code action asks over a zero-width range", &Json.path(&action, &["range", "start"]), &Json.path(&action, &["range", "end"])),
+      Test.equals("a workspace symbol query carries only the query", &Access.members(&symbols).length(), &1),
+      Test.equals("an outline carries only the document", &Access.members(&outline).length(), &1),
+      Test.that("the conversation opens the document", said.contains("textDocument/didOpen")),
+      Test.that("the conversation ends with exit", said.contains("\"method\":\"exit\"")),
+      Test.not("a workspace question without source opens nothing", unopened.contains("didOpen")),
+      Test.that("a workspace question with source opens it", symbolsWithSource.contains("didOpen")),
+      Test.equals("completion says it was asked for", &Json.path(&completing, &["context", "triggerKind"]), &Some(Json.Number(1))),
+      Test.equals("hover carries no completion context", &Json.path(&hover, &["context"]), &None),
+      Test.equals("position zero clamps to zero", &(Access.pathInt(&origin, &["position", "line"]), Access.pathInt(&origin, &["position", "character"])), &(Some(0), Some(0))),
+      Test.that("frames count UTF-8 bytes", Conversation.frame(&Json.Text("é")).startsWith("Content-Length: 4\r\n\r\n")),
+      Test.equals("the question's reply is the answer", &answer.result, &Some(Json.object(&[("contents", Json.Text("é"))]))),
+      Test.equals("published diagnostics are collected", &answer.diagnostics.length(), &1),
+      Test.equals("a server error is the answer's error", &refused.error, &Some("no such method")),
+      Test.equals("no reply to the question is no result", &silent.result, &None),
+      Test.equals("a null reply is a result", &nulled.result, &Some(Json.Null))
+    ])
+  let ran = Test.run(&checks)
+  for failure in Test.failuresOf(&ran) {
+    let _reported = Io.writeErrorLine(failure)
+  }
+  Test.report(&ran)
+}

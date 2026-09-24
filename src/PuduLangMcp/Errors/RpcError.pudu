@@ -1,0 +1,53 @@
+/** @Errors.RpcError.Module — protocol refusals and their wire form */
+module PuduLangMcp.Errors.RpcError
+
+import Std.Json as Json
+import PuduLangMcp.Constants.Protocol as Protocol
+
+/** @Errors.RpcError.ProtocolError — every protocol-level refusal */
+export type ProtocolError
+  = ParseError(Str)
+  | InvalidRequest(Str)
+  | MethodNotFound(Str)
+  | InvalidParams(Str)
+  | ResourceNotFound(Str)
+  | UnsupportedVersion(Str)
+  | Internal(Str)
+
+/// The JSON-RPC error code for a refusal.
+export fn code(problem: &ProtocolError) -> Int {
+  match problem {
+    case ParseError(_) => Protocol.PARSE_ERROR
+    case InvalidRequest(_) => Protocol.INVALID_REQUEST
+    case MethodNotFound(_) => Protocol.METHOD_NOT_FOUND
+    case InvalidParams(_) => Protocol.INVALID_PARAMS
+    case ResourceNotFound(_) => Protocol.INVALID_PARAMS
+    case UnsupportedVersion(_) => Protocol.UNSUPPORTED_PROTOCOL_VERSION
+    case Internal(_) => Protocol.INTERNAL_ERROR
+  }
+}
+
+/// The error message for a refusal, with its detail.
+export fn message(problem: &ProtocolError) -> Str {
+  match problem {
+    case ParseError(detail) => "Parse error: " + detail
+    case InvalidRequest(detail) => "Invalid request: " + detail
+    case MethodNotFound(method) => "Method not found: " + method
+    case InvalidParams(detail) => "Invalid params: " + detail
+    case ResourceNotFound(_) => "Resource not found"
+    case UnsupportedVersion(_) => "Unsupported protocol version"
+    case Internal(detail) => "Internal error: " + detail
+  }
+}
+
+/// Structured error data, for the refusals that carry it.
+export fn data(problem: &ProtocolError) -> Option[Json.Json] {
+  match problem {
+    case ResourceNotFound(uri) => Some(Json.object(&[("uri", Json.Text(uri))]))
+    case UnsupportedVersion(requested) => Some(Json.object(&[
+          ("supported", Json.list(&Protocol.supportedVersions().map(|v: Str| Json.Text(v)))),
+          ("requested", Json.Text(requested))
+        ]))
+    case _ => None
+  }
+}
