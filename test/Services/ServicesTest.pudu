@@ -1,0 +1,118 @@
+/** @Test.Services.ServicesTest.Suite — processes, discovery, and module files */
+module Services.ServicesTest
+
+import Std.Bytes as ByteSeq
+import Std.Env as Env
+import Std.Fs as Fs
+import Std.Io as Io
+import Std.Path as Path
+import Std.Result as Result
+import Std.Test as Test
+import Services.Process.Bounded as Bounded
+import Services.Reference as Reference
+import Services.Toolchain as Toolchain
+import Services.Workspace as Workspace
+
+/// A finished shell command, or a marker for one that could not start.
+fn shell(script: Str, input: Str, millis: Int, cap: Int) -> Bounded.Finished {
+  Result.unwrapOr(Bounded.run("/bin/sh", &["-c", script], input, "", millis, cap), Bounded.Finished{status: -99, output: "", errors: "", timedOut: false, truncated: false, millis: 0})
+}
+
+/// Writes a file, creating its directory.
+fn place(path: Str, text: Str) -> () {
+  let _made = Io.makeDirectory(Path.directoryOf(path))
+  let _written = Io.write(path, text)
+}
+
+/// Runs the suite.
+fn main() -> Int {
+  let temporary = Env.temporaryDirectory()
+  let mixed = shell("echo out; echo err >&2; exit 3", "", 5000, 4096)
+  let echoed = shell("cat", "line one\nline two", 5000, 4096)
+  let slow = shell("sleep 5", "", 200, 4096)
+  let held = shell("echo early; sleep 5; true", "", 200, 4096)
+  let quiet = shell("sleep 5 2>/dev/null; true", "", 200, 4096)
+  let late = shell("echo first; (sleep 0.05; echo second) &", "", 5000, 4096)
+  let flood = shell("yes x | head -c 100000", "", 5000, 1000)
+  let missing = Bounded.run("/nonexistent/program", &[], "", "", 1000, 1000)
+  let accent = ByteSeq.fromText("é")
+  let euro = ByteSeq.fromText("€")
+  let emoji = ByteSeq.fromText("😀")
+  let mixedText = ByteSeq.fromText("a😀")
+  let exactCap = shell("head -c 1000 /dev/zero | tr '\\000' x", "", 5000, 1000)
+  let pastCapLater = shell("head -c 1000 /dev/zero | tr '\\000' x; sleep 0.3; printf y", "", 5000, 1000)
+  let archive = Result.unwrapOr(Fs.temporaryDirectoryIn(temporary, "pudu-mcp-archive-"), "/nonexistent")
+  place(archive + "/bin/pudu", "")
+  place(archive + "/lib/pudu/Std/Io.pudu", "module Std.Io\n")
+  let checkout = Result.unwrapOr(Fs.temporaryDirectoryIn(temporary, "pudu-mcp-checkout-"), "/nonexistent")
+  place(checkout + "/dist/build/x/pudu", "")
+  place(checkout + "/packages/pudu/v0.1/lib/Std/Io.pudu", "module Std.Io\n")
+  place(checkout + "/packages/pudu/v0.2/lib/Std/Io.pudu", "module Std.Io\n")
+  let lonely = Result.unwrapOr(Fs.temporaryDirectoryIn(temporary, "pudu-mcp-lonely-"), "/nonexistent")
+  place(lonely + "/bin/pudu", "")
+  let workspace = Result.unwrapOr(Fs.temporaryDirectoryIn(temporary, "pudu-mcp-deps-"), "/nonexistent")
+  place(workspace + "/deps/shapes/src/Shapes.pudu", "module Shapes\n")
+  place(workspace + "/deps/shapes/src/Shapes/Area.pudu", "module Shapes.Area\n")
+  place(workspace + "/deps/shapes/README.md", "no module")
+  place(workspace + "/deps/flat/Flat.pudu", "module Flat\n")
+  place(workspace + "/deps/clash/src/Std/Io.pudu", "module Std.Io\n")
+  place(workspace + "/deps/deep/src/" + "D/".repeat(12) + "Found.pudu", "module Found\n")
+  place(workspace + "/deps/deeper/src/" + "E/".repeat(13) + "Lost.pudu", "module Lost\n")
+  let files = Reference.moduleFiles(Some(archive + "/lib/pudu"), workspace)
+  let names = files.map(|held: Reference.ModuleFile| held.moduleName)
+  let stdIo = Reference.fileOf(&files, "Std.Io")
+  let located = Workspace.at(workspace)
+  let checks = Test.suite("Services", &[
+      Test.equals("a run answers its exit status", &mixed.status, &3),
+      Test.equals("a run answers its standard output", &mixed.output.trim(), &"out"),
+      Test.equals("a run answers its standard error", &mixed.errors.trim(), &"err"),
+      Test.not("a finished run did not time out", mixed.timedOut),
+      Test.equals("input reaches the child", &echoed.output, &"line one\nline two"),
+      Test.that("a slow child is stopped at its deadline", slow.timedOut && slow.status == -1),
+      Test.that("a stopped child costs about its deadline", slow.millis < 3000),
+      Test.that("a grandchild holding the streams does not outlast the deadline", held.timedOut && held.millis < 3000),
+      Test.equals("output written before the deadline is kept", &held.output.trim(), &"early"),
+      Test.that("a stream left open past the grace is marked cut", held.truncated),
+      Test.not("a run whose streams closed is not marked cut", mixed.truncated),
+      Test.that("a silent stream held open alone still ends near the deadline", quiet.timedOut && quiet.millis < 3000),
+      Test.that("one stream left open is enough to mark the run cut", quiet.truncated),
+      Test.equals("a stream that closes within the grace is read to its end", &late.output.trim(), &"first\nsecond"),
+      Test.not("a stream that closes within the grace is not marked cut", late.truncated),
+      Test.that("output past the cap is cut and marked", flood.truncated && flood.output.length() == 1000),
+      Test.errored("a program that cannot start is an error", &missing),
+      Test.equals("a cut inside a character backs off to its start", &Bounded.textWithin(&accent, 1), &("", true)),
+      Test.equals("a cut inside a three-byte character backs off", &[Bounded.textWithin(&euro, 1), Bounded.textWithin(&euro, 2)], &[("", true), ("", true)]),
+      Test.equals("a cut inside a four-byte character backs off", &Bounded.textWithin(&emoji, 3), &("", true)),
+      Test.equals("a cut after text keeps the text before the broken character", &Bounded.textWithin(&mixedText, 4), &("a", true)),
+      Test.equals("a four-byte character within the cap is whole", &Bounded.textWithin(&emoji, 4), &("😀", false)),
+      Test.that("output exactly at the cap is whole", !exactCap.truncated && exactCap.output.length() == 1000),
+      Test.that("output past the cap in a later write is still cut", pastCapLater.truncated && pastCapLater.output.length() == 1000),
+      Test.equals("text within the cap is whole", &Bounded.textWithin(&accent, 2), &("é", false)),
+      Test.equals("bytes that are not text are marked", &Bounded.textWithin(&ByteSeq.fromArray(&[255u8, 254u8, 253u8, 252u8, 251u8]), 8), &("[output that is not UTF-8 text]", false)),
+      Test.equals("one invalid byte is not a truncated character", &Bounded.textWithin(&ByteSeq.fromArray(&[255u8]), 8), &("[output that is not UTF-8 text]", false)),
+      Test.not("a child has time before its deadline", Bounded.deadlineReached(99, 100)),
+      Test.that("a child expires at and after its deadline", Bounded.deadlineReached(100, 100) && Bounded.deadlineReached(101, 100)),
+      Test.not("scripted finished output is not truncated", Toolchain.finished(0, "x").truncated),
+      Test.equals("an archive's library is beside its bin directory", &Toolchain.libraryFrom(archive + "/bin/pudu"), &Some(archive + "/lib/pudu")),
+      Test.equals("a checkout's newest series is chosen", &Toolchain.libraryFrom(checkout + "/dist/build/x/pudu"), &Some(checkout + "/packages/pudu/v0.2/lib")),
+      Test.equals("no library anywhere above is none", &Toolchain.libraryFrom(lonely + "/bin/pudu"), &None),
+      Test.that("installed packages are importable modules", names.contains("Shapes") && names.contains("Shapes.Area")),
+      Test.that("a package without src is read from its root", names.contains("Flat")),
+      Test.equals("the library wins a duplicate module name", &match stdIo { case Some(held) => held.origin case None => "" }, &"Std"),
+      Test.equals("module files are sorted by name", &names.filter(|name: Str| !name.startsWith("D.") && !name.startsWith("E.")), &["Flat", "Shapes", "Shapes.Area", "Std.Io"]),
+      Test.that("a module twelve directories deep is found", names.contains("D.D.D.D.D.D.D.D.D.D.D.D.Found")),
+      Test.not("a module thirteen directories deep is not", names.contains("E.E.E.E.E.E.E.E.E.E.E.E.E.Lost")),
+      Test.succeeded("a workspace path resolves inside it", &Workspace.resolve(&located, "deps/flat/Flat.pudu")),
+      Test.equals("a relative path is shown from the root", &Workspace.relative(&located, located.root + "/deps/flat/Flat.pudu"), &"deps/flat/Flat.pudu"),
+      Test.equals("a path outside is shown whole", &Workspace.relative(&located, "/etc/hosts"), &"/etc/hosts")
+    ])
+  let _a = Fs.removeTree(archive)
+  let _b = Fs.removeTree(checkout)
+  let _c = Fs.removeTree(lonely)
+  let _d = Fs.removeTree(workspace)
+  let report = Test.run(&checks)
+  for failure in Test.failuresOf(&report) {
+    let _reported = Io.writeErrorLine(failure)
+  }
+  Test.report(&report)
+}

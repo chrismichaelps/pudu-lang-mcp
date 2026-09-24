@@ -1,0 +1,89 @@
+/** @Test.Domain.Catalog.ToolsTest.Suite — catalogue invariants and handler coverage */
+module Domain.Catalog.ToolsTest
+
+import Std.Io as Io
+import Std.Json as Json
+import Std.List as List
+import Std.Map as Map
+import Std.Test as Test
+import Std.Text as Text
+import App.Tools.Registry as Registry
+import Domain.Catalog.ToolSpec as ToolSpec
+import Domain.Catalog.Tools as Tools
+import Utils.JsonAccess as Access
+
+/// Whether a tool name uses only the characters the specification recommends.
+fn wellFormed(name: Str) -> Bool {
+  name.length() >= 1 && name.length() <= 128 && Text.allChars(name, |c: Char| (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.')
+}
+
+/// Each tool's hints as read-only, destructive, idempotent, open-world, then its required arguments.
+fn expected() -> Array[(Str, (Bool, Bool, Bool, Bool), Array[Str])] {
+  let lookup = (true, false, true, false)
+  let position = ["line", "character"]
+  [
+    ("pudu_docs_search", lookup, ["query"]),
+    ("pudu_docs_read", lookup, ["slug"]),
+    ("pudu_reference_search", lookup, ["query"]),
+    ("pudu_module_reference", lookup, ["module"]),
+    ("pudu_check", lookup, []),
+    ("pudu_format", lookup, []),
+    ("pudu_lint", lookup, []),
+    ("pudu_run", (true, false, false, false), ["source"]),
+    ("pudu_test", (false, false, false, true), []),
+    ("pudu_hover", lookup, position),
+    ("pudu_definition", lookup, position),
+    ("pudu_references", lookup, position),
+    ("pudu_completion", lookup, position),
+    ("pudu_signature_help", lookup, position),
+    ("pudu_code_actions", lookup, position),
+    ("pudu_rename_preview", lookup, ["line", "character", "newName"]),
+    ("pudu_document_symbols", lookup, []),
+    ("pudu_workspace_symbols", lookup, ["query"]),
+    ("pudu_toolchain", lookup, [])
+  ]
+}
+
+/// A tool's hints and required arguments as the catalogue declares them.
+fn declared(spec: &ToolSpec.ToolSpec) -> (Str, (Bool, Bool, Bool, Bool), Array[Str]) {
+  let hints = (spec.annotations.readOnly, spec.annotations.destructive, spec.annotations.idempotent, spec.annotations.openWorld)
+  (spec.name, hints, spec.properties.filter(|held: ToolSpec.Property| held.required).map(|held: ToolSpec.Property| held.name))
+}
+
+/// Runs the suite.
+fn main() -> Int {
+  let all = Tools.all()
+  let names = all.map(|spec: ToolSpec.ToolSpec| spec.name)
+  let described = all.map(|spec: ToolSpec.ToolSpec| ToolSpec.toJson(&spec))
+  let handlers = Registry.handlers()
+  let rename = Tools.find("pudu_rename_preview")
+  let docs = described.filter(|tool: Json.Json| Access.text(&tool, "name") == Some("pudu_docs_search"))[0]
+  let check = described.filter(|tool: Json.Json| Access.text(&tool, "name") == Some("pudu_check"))[0]
+  let bare = described.filter(|tool: Json.Json| Access.text(&tool, "name") == Some("pudu_toolchain"))[0]
+  let checks = Test.suite("Domain.Catalog.Tools", &[
+      Test.equals("names are unique", &List.distinct(&names).length(), &names.length()),
+      Test.all("names are well formed", &names, |name: Str| wellFormed(name)),
+      Test.all("names carry the pudu_ prefix", &names, |name: Str| name.startsWith("pudu_")),
+      Test.all("every tool has a handler", &names, |name: Str| Map.containsKey(&handlers, name)),
+      Test.equals("every handler has a tool", &Map.size(&handlers), &names.length()),
+      Test.all("every schema is a closed object", &described, |tool: Json.Json| Access.pathText(&tool, &["inputSchema", "type"]) == Some("object") && Json.path(&tool, &["inputSchema", "additionalProperties"]) == Some(Json.Boolean(false))),
+      Test.all("every tool declares all four hints", &described, |tool: Json.Json| ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"].filter(|hint: Str| Json.path(&tool, &["annotations", hint]) == None).isEmpty()),
+      Test.all("no tool is destructive", &all, |spec: ToolSpec.ToolSpec| !spec.annotations.destructive),
+      Test.all("a description is present", &all, |spec: ToolSpec.ToolSpec| !Text.isBlank(spec.description)),
+      Test.all("no exclusive name is also required", &all, |spec: ToolSpec.ToolSpec| spec.properties.filter(|held: ToolSpec.Property| held.required && spec.exactlyOne.contains(held.name)).isEmpty()),
+      Test.all("exclusive names are declared properties", &all, |spec: ToolSpec.ToolSpec| spec.exactlyOne.filter(|name: Str| !spec.properties.map(|held: ToolSpec.Property| held.name).contains(name)).isEmpty()),
+      Test.present("a rename preview is offered", &rename),
+      Test.equals("every tool declares its hints and required arguments", &all.map(|spec: ToolSpec.ToolSpec| declared(&spec)), &expected()),
+      Test.equals("a tool without required arguments has no required member", &Json.path(&described.filter(|tool: Json.Json| Access.text(&tool, "name") == Some("pudu_test"))[0], &["inputSchema", "required"]), &None),
+      Test.equals("required arguments reach the schema", &Json.path(&docs, &["inputSchema", "required"]), &Some(Access.texts(&["query"]))),
+      Test.that("an exclusive pair is described as oneOf", Json.path(&check, &["inputSchema", "oneOf"]) != None),
+      Test.equals("bounds reach the schema", &Access.pathInt(&docs, &["inputSchema", "properties", "limit", "maximum"]), &Some(25)),
+      Test.absent("an unknown tool is not found", &Tools.find("pudu_nope")),
+      Test.equals("a tool without arguments has no properties member", &Json.path(&bare, &["inputSchema", "properties"]), &None)
+    ])
+  let ran = Test.run(&checks)
+  for failure in Test.failuresOf(&ran) {
+    let _reported = Io.writeErrorLine(failure)
+  }
+  Test.report(&ran)
+}

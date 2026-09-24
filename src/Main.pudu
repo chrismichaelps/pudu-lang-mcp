@@ -1,0 +1,9 @@
+/** @Main.Entry.Program — starts the MCP server */
+module Main
+
+import PuduLangMcp as Server
+
+/// Serves MCP over stdio and answers the exit status.
+fn main() -> Int {
+  Server.serve()
+}

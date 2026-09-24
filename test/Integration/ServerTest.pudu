@@ -1,0 +1,92 @@
+/** @Test.Integration.ServerTest.Suite — the real server over stdio with the real compiler */
+module Integration.ServerTest
+
+import Std.Io as Io
+import Std.Json as Json
+import Std.List as List
+import Std.Option as Option
+import Std.Result as Result
+import Std.Test as Test
+import Constants.Protocol as Protocol
+import Services.Process.Bounded as Bounded
+import Services.Toolchain as Toolchain
+import Utils.JsonAccess as Access
+
+/// How long the whole session may take.
+const SESSION_MILLIS: Int = 180000
+
+/// Most bytes kept from the session's output.
+const SESSION_CAP: Int = 16777216
+
+/// One request line.
+fn request(id: Int, method: Str, params: Json.Json) -> Str {
+  Json.encode(&Json.object(&[("jsonrpc", Json.Text("2.0")), ("id", Json.Number(id)), ("method", Json.Text(method)), ("params", params)]))
+}
+
+/// A tool call's parameters.
+fn tool(name: Str, arguments: &Array[(Str, Json.Json)]) -> Json.Json {
+  Json.object(&[("name", Json.Text(name)), ("arguments", Json.object(arguments))])
+}
+
+/// The first text block of the reply with an id.
+fn textOf(replies: &Array[Json.Json], id: Int) -> Str {
+  match List.find(replies, |reply: Json.Json| Access.integer(&reply, "id") == Some(id)) {
+    case Some(reply) => Option.unwrapOr(Option.andThen(Option.andThen(Json.path(&reply, &["result", "content"]), |content: Json.Json| Json.at(&content, 0)), |block: Json.Json| Access.text(&block, "text")), Json.encode(&reply))
+    case None => ""
+  }
+}
+
+/// The reply at a position, or null when the server wrote fewer lines.
+fn replyAt(replies: &Array[Json.Json], index: Int) -> Json.Json {
+  Option.unwrapOr(List.get(replies, index), Json.Null)
+}
+
+/// Runs the suite.
+fn main() -> Int {
+  let toolchain = Toolchain.locate()
+  let compiler = Option.unwrapOr(toolchain.compiler, "")
+  let modernMeta = Json.object(&[(Protocol.META_PROTOCOL_VERSION, Json.Text(Protocol.MODERN_VERSION)), (Protocol.META_CLIENT_CAPABILITIES, Json.object(&[]))])
+  let program = "module Main\n\nimport Std.Io as Io\n\n/// Doubles a number.\nfn double(value: Int) -> Int \{ value * 2 \}\n\nfn main() -> Int \{\n  let _written = Io.writeLine(\"hello from the run\")\n  double(21) - 42\n\}\n"
+  let lines = [
+    request(1, "initialize", Json.object(&[("protocolVersion", Json.Text("2025-11-25")), ("capabilities", Json.object(&[])), ("clientInfo", Json.object(&[("name", Json.Text("test")), ("version", Json.Text("1"))]))])),
+    Json.encode(&Json.object(&[("jsonrpc", Json.Text("2.0")), ("method", Json.Text("notifications/initialized"))])),
+    request(2, "tools/list", Json.object(&[])),
+    request(3, "tools/call", tool("pudu_check", &[("source", Json.Text("module Main\n\nfn main() -> Int \{ \"x\" \}\n"))])),
+    request(4, "tools/call", tool("pudu_hover", &[("source", Json.Text(program)), ("line", Json.Number(10)), ("character", Json.Number(4))])),
+    request(5, "tools/call", tool("pudu_run", &[("source", Json.Text(program))])),
+    request(6, "tools/call", tool("pudu_module_reference", &[("module", Json.Text("Std.Json"))])),
+    request(7, "tools/call", tool("pudu_docs_search", &[("query", Json.Text("ownership"))])),
+    request(8, "tools/call", tool("pudu_format", &[("source", Json.Text("module Main\nfn main()->Int\{0\}\n"))])),
+    request(9, "server/discover", Json.object(&[(Protocol.META_KEY, modernMeta)])),
+    request(10, "tools/call", Json.object(&[("name", Json.Text("pudu_document_symbols")), ("arguments", Json.object(&[("source", Json.Text(program))])), (Protocol.META_KEY, modernMeta)])),
+    "not json"
+  ]
+  let session = Bounded.run(compiler, &["run", "src/Main.pudu"], lines.join("\n") + "\n", "", SESSION_MILLIS, SESSION_CAP)
+  let finished = Result.unwrapOr(session, Bounded.Finished{status: -99, output: "", errors: "", timedOut: false, truncated: false, millis: 0})
+  let written = finished.output.split("\n").filter(|line: Str| !line.trim().isEmpty())
+  let replies = written.map(|line: Str| Result.unwrapOr(Json.decode(line), Json.Null))
+  let ids = replies.map(|reply: Json.Json| Access.member(&reply, "id"))
+  let skip = compiler.isEmpty()
+  let checks = Test.suite("Integration.Server", &[
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.equals("the server exits cleanly at end of input", &finished.status, &0)),
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.equals("every request gets exactly one line, and nothing else is written", &written.length(), &11)),
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.that("every line is JSON", replies.filter(|reply: Json.Json| reply == Json.Null).isEmpty())),
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.equals("replies keep request order", &List.take(&ids, 3), &[Some(Json.Number(1)), Some(Json.Number(2)), Some(Json.Number(3))])),
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.that("initialize echoes the version", Json.encode(&replyAt(&replies, 0)).contains("\"protocolVersion\":\"2025-11-25\""))),
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.that("every tool is listed", Json.encode(&replyAt(&replies, 1)).contains("pudu_workspace_symbols"))),
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.that("check answers the real diagnostic", textOf(&replies, 3).contains("E3001"))),
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.that("hover answers the real type", textOf(&replies, 4).contains("fn(Int) -> Int"))),
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.that("a confined run prints and exits", textOf(&replies, 5).startsWith("exit status 0") && textOf(&replies, 5).contains("hello from the run"))),
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.that("the module reference comes from the installed library", textOf(&replies, 6).contains("fn Std.Json.decode"))),
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.that("the documentation answers from the corpus", textOf(&replies, 7).contains("docs/ownership"))),
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.that("format lays the code out", textOf(&replies, 8).contains("fn main() -> Int \{ 0 \}"))),
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.that("a modern request is served inside a legacy process", Json.encode(&replyAt(&replies, 8)).contains("supportedVersions"))),
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.that("document symbols come from the language server", textOf(&replies, 10).contains("function double"))),
+      Test.skipIf(skip, "no pudu compiler on this machine", &Test.equals("garbage is answered with a parse error", &Access.pathInt(&replyAt(&replies, 10), &["error", "code"]), &Some(Protocol.PARSE_ERROR)))
+    ])
+  let report = Test.run(&checks)
+  for failure in Test.failuresOf(&report) {
+    let _reported = Io.writeErrorLine(failure)
+  }
+  Test.report(&report)
+}

@@ -1,0 +1,51 @@
+/** @Domain.Code.SourceFile.Module — maps module names to source paths */
+module Domain.Code.SourceFile
+
+import Std.Char as Char
+import Std.Text as Text
+
+/// The file extension of Pudu source.
+const EXTENSION: Str = ".pudu"
+
+/// The name a `module` declaration gives, when the source begins with a valid one.
+export fn moduleNameOf(source: Str) -> Option[Str] {
+  for raw in source.split("\n") {
+    let line = raw.trim()
+    let comment = line.startsWith("//") || (line.startsWith("/*") && line.endsWith("*/"))
+    if !line.isEmpty() && !comment {
+      if !line.startsWith("module ") { return None }
+      let name = line.drop(7).trim()
+      return if isModuleName(name) { Some(name) } else { None }
+    }
+  }
+  None
+}
+
+/// The path under a source root that a module's file must have.
+export fn fileOf(moduleName: Str) -> Str {
+  moduleName.replace(".", "/") + EXTENSION
+}
+
+/// The module a source-root-relative file declares by its path, when the path is a module path.
+export fn moduleOfFile(relative: Str) -> Option[Str] {
+  if !relative.endsWith(EXTENSION) { return None }
+  let name = Text.stripSuffix(relative, EXTENSION).replace("/", ".")
+  if isModuleName(name) { Some(name) } else { None }
+}
+
+/// Whether text is a dotted module name.
+export fn isModuleName(name: Str) -> Bool {
+  if name.isEmpty() { return false }
+  for segment in name.split(".") {
+    if !isSegment(segment) { return false }
+  }
+  true
+}
+
+/// Whether text is one segment of a module name.
+fn isSegment(segment: Str) -> Bool {
+  match Text.uncons(segment) {
+    case None => false
+    case Some((first, rest)) => Char.isLetter(first) && Text.allChars(rest, |c: Char| Char.isAlphanumeric(c) || c == '_')
+  }
+}

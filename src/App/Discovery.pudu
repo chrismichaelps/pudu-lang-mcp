@@ -1,0 +1,48 @@
+/** @App.Discovery.Handler — server identity, capabilities, and handshake answers */
+module App.Discovery
+
+import Std.Json as Json
+import App.Context as Context
+import Constants.Protocol as Protocol
+import Constants.Server as Server
+import Domain.Rpc.Reply as Reply
+import Errors.RpcError as RpcError
+import Utils.JsonAccess as Access
+
+/// The features this server implements.
+export fn capabilities() -> Json.Json {
+  Json.object(&[
+      ("tools", Json.object(&[])),
+      ("resources", Json.object(&[])),
+      ("prompts", Json.object(&[])),
+      ("completions", Json.object(&[]))
+    ])
+}
+
+/// Answers `server/discover`: versions, capabilities, and instructions.
+export fn discover(context: &Context.Context, params: &Json.Json) -> Result[Json.Json, RpcError.ProtocolError] {
+  Ok(Reply.complete(&[
+        ("supportedVersions", Access.texts(&Protocol.supportedVersions())),
+        ("capabilities", capabilities()),
+        ("instructions", Json.Text(Server.INSTRUCTIONS))
+      ], &Reply.Cached(Server.LIST_TTL_MS, Protocol.CACHE_PUBLIC)))
+}
+
+/// Answers `initialize` for a negotiated legacy version.
+export fn initialize(version: Str) -> Json.Json {
+  Reply.complete(&[
+      ("protocolVersion", Json.Text(version)),
+      ("capabilities", capabilities()),
+      ("serverInfo", Json.object(&[
+            ("name", Json.Text(Server.SERVER_NAME)),
+            ("title", Json.Text(Server.SERVER_TITLE)),
+            ("version", Json.Text(Server.SERVER_VERSION))
+          ])),
+      ("instructions", Json.Text(Server.INSTRUCTIONS))
+    ], &Reply.NoCache)
+}
+
+/// Answers a legacy `ping`.
+export fn pong() -> Json.Json {
+  Reply.complete(&[], &Reply.NoCache)
+}

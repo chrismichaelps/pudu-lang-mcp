@@ -1,0 +1,111 @@
+/** @Services.Toolchain.Seam — locates and runs the installed compiler */
+module Services.Toolchain
+
+import Std.Env as Env
+import Std.Fs as Fs
+import Std.Io as Io
+import Std.List as List
+import Std.Option as Option
+import Std.Path as Path
+import Std.Text as Text
+import Constants.Server as Server
+import Services.Process.Bounded as Bounded
+
+/** @Services.Toolchain.Toolchain — compiler location, library, version, and runner */
+export type Toolchain = {
+  compiler: Option[Str],
+  library: Option[Str],
+  version: Str,
+  run: fn(Array[Str], Str, Str, Int, Int) -> Result[Bounded.Finished, Str]
+}
+
+/// The executable's file name.
+const EXECUTABLE: Str = "pudu"
+
+/// How many ancestors of the executable's directory are searched for the library.
+const LIBRARY_SEARCH_DEPTH: Int = 16
+
+/// What `run` answers when no compiler was found.
+const NOT_FOUND: Str = "pudu was not found"
+
+/// The toolchain this machine has, located from the environment.
+export fn locate() -> Toolchain {
+  let compiler = findCompiler()
+  let runner = runnerFor(compiler)
+  let version = match compiler {
+    case Some(_) => match runner(["version"], "", "", Server.COMMAND_TIMEOUT_MS, Server.OUTPUT_CAP_BYTES) {
+      case Ok(done) => Text.stripPrefix(done.output.trim(), "pudu ")
+      case Err(_) => ""
+    }
+    case None => ""
+  }
+  let library = match Env.variable(Server.ENV_PUDU_LIB) {
+    case Some(given) => if hasStd(given) { Some(given) } else { Option.andThen(compiler, |path: Str| libraryFrom(path)) }
+    case None => Option.andThen(compiler, |path: Str| libraryFrom(path))
+  }
+  Toolchain{compiler: compiler, library: library, version: version, run: runner}
+}
+
+/// A toolchain that answers from a function instead of a process.
+export fn scripted(version: Str, library: Option[Str], answer: fn(Array[Str], Str, Str) -> Bounded.Finished) -> Toolchain {
+  Toolchain{compiler: Some(EXECUTABLE), library: library, version: version, run: fn(arguments: Array[Str], input: Str, directory: Str, millis: Int, capBytes: Int) -> Result[Bounded.Finished, Str] {
+      Ok(answer(arguments, input, directory))
+    } }
+}
+
+/// A finished run with a status and output, for scripted toolchains.
+export fn finished(status: Int, output: Str) -> Bounded.Finished {
+  Bounded.Finished{status: status, output: output, errors: "", timedOut: false, truncated: false, millis: 0}
+}
+
+/// The standard library an installed or development compiler uses.
+export fn libraryFrom(compiler: Str) -> Option[Str] {
+  let ancestors = List.take(&Path.ancestors(Path.directoryOf(compiler)), LIBRARY_SEARCH_DEPTH)
+  for ancestor in ancestors {
+    for candidate in [Path.join(ancestor, "lib/pudu"), Path.join(ancestor, "lib")] {
+      if hasStd(candidate) { return Some(candidate) }
+    }
+    let series = Path.join(ancestor, "packages/pudu")
+    if Io.exists(series) {
+      match Io.list(series) {
+        case Ok(names) => {
+          let newest = List.reversed(&List.sorted(&names.filter(|name: Str| name.startsWith("v"))))
+          for name in newest {
+            let candidate = Path.join(series, name + "/lib")
+            if hasStd(candidate) { return Some(candidate) }
+          }
+        }
+        case Err(_) => ()
+      }
+    }
+  }
+  None
+}
+
+/// The compiler named by `PUDU_BIN`, else the first on the search path, canonicalized.
+fn findCompiler() -> Option[Str] {
+  let configured = Option.andThen(Env.variable(Server.ENV_PUDU_BIN), |given: Str| if Io.exists(given) { Some(given) } else { None })
+  let onPath = List.find(&Env.searchPath().map(|directory: Str| Path.join(directory, EXECUTABLE)), |candidate: Str| Io.exists(candidate))
+  let path = Option.orElse(configured, onPath) ?
+  match Fs.canonical(path) {
+    case Ok(real) => Some(real)
+    case Err(_) => Some(path)
+  }
+}
+
+/// The run function for a compiler, or one that always reports it missing.
+fn runnerFor(compiler: Option[Str]) -> fn(Array[Str], Str, Str, Int, Int) -> Result[Bounded.Finished, Str] {
+  match compiler {
+    case Some(path) => fn(arguments: Array[Str], input: Str, directory: Str, millis: Int, capBytes: Int) -> Result[Bounded.Finished, Str] {
+      Bounded.run(path, &arguments, input, directory, millis, capBytes)
+    }
+    case None => fn(arguments: Array[Str], input: Str, directory: Str, millis: Int, capBytes: Int) -> Result[Bounded.Finished, Str] {
+      Err(NOT_FOUND)
+    }
+  }
+}
+
+/// Whether a directory holds the standard library's `Std` modules.
+fn hasStd(directory: Str) -> Bool {
+  Io.exists(Path.join(directory, "Std/Io.pudu"))
+}

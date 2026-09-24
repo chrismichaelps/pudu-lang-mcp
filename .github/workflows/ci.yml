@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+env:
+  PUDU_VERSION: "0.1.1"
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Pudu from its published archive
+        run: |
+          set -euo pipefail
+          archive="pudu-${PUDU_VERSION}-linux-amd64.tar.gz"
+          base="https://github.com/chrismichaelps/pudu-lang/releases/download/v${PUDU_VERSION}"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/$archive"
+          curl -fsSLO "$base/$archive.sha256"
+          sha256sum -c "$archive.sha256"
+          tar -xzf "$archive"
+          echo "$RUNNER_TEMP/pudu-${PUDU_VERSION}-linux-amd64/bin" >> "$GITHUB_PATH"
+      - run: pudu version
+      - name: Check
+        run: pudu check $(find src test tools -name '*.pudu')
+      - name: Format
+        run: pudu fmt --check src test tools
+      - name: Lint
+        run: pudu lint src test tools
+      - name: Test
+        run: pudu test test
+      - name: Build the server
+        run: pudu build src/Main.pudu -o "$RUNNER_TEMP/pudu-lang-mcp"
+
+  mutation:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Pudu from its published archive
+        run: |
+          set -euo pipefail
+          archive="pudu-${PUDU_VERSION}-linux-amd64.tar.gz"
+          base="https://github.com/chrismichaelps/pudu-lang/releases/download/v${PUDU_VERSION}"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/$archive"
+          curl -fsSLO "$base/$archive.sha256"
+          sha256sum -c "$archive.sha256"
+          tar -xzf "$archive"
+          echo "$RUNNER_TEMP/pudu-${PUDU_VERSION}-linux-amd64/bin" >> "$GITHUB_PATH"
+      - name: Mutation testing on a deterministic sample
+        run: pudu run tools/Mutate.pudu --every 3 --threshold 100

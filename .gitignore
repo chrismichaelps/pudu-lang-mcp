@@ -1,0 +1,9 @@
+.pudu/
+deps/
+*.o
+
+.DS_Store
+*.swp
+
+# Local governance input; never committed.
+fmcf.md
