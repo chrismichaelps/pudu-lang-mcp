@@ -5,8 +5,8 @@ tags: [moc, handoff]
 
 # Handoffs
 
-- [[handoffs/2026-09-23-package-publication]] — 0.1.0 released; 0.1.1 moves every module under
-  the package root.
+- [[handoffs/2026-09-23-package-publication]] — complete: 0.1.0 and 0.1.1 released and listed on
+  pudu-lang.org.
 
 ## Referenced by
 

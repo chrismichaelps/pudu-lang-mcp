@@ -2,6 +2,7 @@
 type: handoff
 from_role: Forensic Guardian
 to_role: Architect
+status: complete
 tags: [handoff, delivery]
 ---
 
@@ -23,20 +24,22 @@ tags: [handoff, delivery]
 
 ## Decided
 
-- The package is released from `main` only.
-- 0.1.0 was released and installs, but its modules sat beside the root and collided with a
-  consumer's own `App` and `Domain` modules. #5 moves them under `PuduLangMcp` for 0.1.1.
-- `main` and `dev` require the `checks` and `mutation` jobs and refuse force pushes and deletion.
+- The package is released from `main` only; `main` and `dev` require the `checks` and `mutation`
+  jobs and refuse force pushes and deletion.
+- 0.1.0 shipped modules beside its root; 0.1.1 moved every module under `PuduLangMcp` (#5).
+- Released 0.1.0 and 0.1.1 as tags with GitHub releases and the `pudu-package` topic. A consumer
+  with its own `App.Context` installs `@chrismichaelps/pudu-lang-mcp@0.1.1` and serves it.
+- www.pudu-lang.org lists the package at `/@chrismichaelps/pudu-lang-mcp`, with 0.1.1 as its
+  latest release, after the site's package index was regenerated and deployed.
 
 ## Open / Remaining
 
-- Merge the #5 pull request into `dev`, then `dev` into `main`.
-- Release 0.1.1 with `pudu release 0.1.1`, create its GitHub release, and confirm a consumer with
-  its own `App.Context` installs and serves `@chrismichaelps/pudu-lang-mcp@0.1.1`.
+- None for publication. A later release repeats `pudu release`, then the site's package index
+  is regenerated and deployed so the listing shows it.
 
 ## Exact next action
 
-Merge the pull request for #5 into `dev` once CI is green.
+None; publication is complete.
 
 ## Links
 
