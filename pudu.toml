@@ -1,0 +1,11 @@
+[package]
+name = "@chrismichaelps/pudu-lang-mcp"
+version = "0.1.0"
+description = "Model Context Protocol server for Pudu language documentation and compiler tools"
+license = "Apache-2.0"
+keywords = ["mcp", "pudu", "compiler", "language-server"]
+language = ">=0.1.1 <0.2.0"
+source = "src"
+root = "PuduLangMcp"
+
+[dependencies]

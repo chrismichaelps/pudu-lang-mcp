@@ -1,0 +1,46 @@
+/** @Test.Utils.UtilsTest.Suite — JSON access, text bounds, and URIs */
+module Utils.UtilsTest
+
+import Std.Io as Io
+import Std.Json as Json
+import Std.Test as Test
+import Utils.JsonAccess as Access
+import Utils.TextBounds as TextBounds
+import Utils.Uri as Uri
+
+/// Runs the suite.
+fn main() -> Int {
+  let value = Json.object(&[("name", Json.Text("x")), ("count", Json.Number(2)), ("flag", Json.Boolean(true)), ("nested", Json.object(&[("deep", Json.Number(9))]))])
+  let checks = Test.suite("Utils", &[
+      Test.equals("a string member is read", &Access.text(&value, "name"), &Some("x")),
+      Test.equals("a member of another kind is not text", &Access.text(&value, "count"), &None),
+      Test.equals("an integer member is read", &Access.integer(&value, "count"), &Some(2)),
+      Test.equals("a boolean member is read", &Access.boolean(&value, "flag"), &Some(true)),
+      Test.equals("a member of a non-object is none", &Access.text(&Json.Text("x"), "name"), &None),
+      Test.equals("a path is followed", &Access.pathInt(&value, &["nested", "deep"]), &Some(9)),
+      Test.equals("a broken path is none", &Access.pathText(&value, &["nested", "missing"]), &None),
+      Test.equals("members of a non-object are none", &Access.members(&Json.Null).length(), &0),
+      Test.equals("kinds follow JSON Schema", &[Json.Null, Json.Boolean(true), Json.Number(1), Json.Fractional("1.5"), Json.Text(""), Json.list(&[]), Json.object(&[])].map(|held: Json.Json| Access.kindOf(&held)), &["null", "boolean", "integer", "number", "string", "array", "object"]),
+      Test.equals("text within its bound is unchanged", &TextBounds.bounded("abc", 3), &"abc"),
+      Test.equals("longer text is cut and says so", &TextBounds.bounded("abcdef", 4), &"abcd\n[truncated: 2 more characters]"),
+      Test.equals("a bound of zero keeps only the marker", &TextBounds.bounded("ab", 0), &"\n[truncated: 2 more characters]"),
+      Test.equals("a snippet centres on its match", &TextBounds.snippet("one two three four five", "three", 9), &"…two three…"),
+      Test.equals("a snippet without a match starts at the beginning", &TextBounds.snippet("one two three", "zzz", 3), &"one…"),
+      Test.equals("empty text fits a zero bound", &TextBounds.bounded("", 0), &""),
+      Test.equals("text exactly as wide as the window has no ellipsis", &TextBounds.snippet("abc", "zz", 3), &"abc"),
+      Test.equals("a match at the start has no leading ellipsis", &TextBounds.snippet("three one two", "three", 5), &"three…"),
+      Test.equals("a window ending at the text's end has no trailing ellipsis", &TextBounds.snippet("abcdefgh", "g", 4), &"…efgh"),
+      Test.equals("an empty needle is no match", &TextBounds.snippet("abcdef", "", 3), &"abc…"),
+      Test.equals("a snippet is one line", &TextBounds.singleLine("a\n\tb   c\r\n"), &"a b c"),
+      Test.equals("a file URI escapes spaces and percent signs", &Uri.fileUri("/tmp/a b/%c.pudu"), &"file:///tmp/a%20b/%25c.pudu"),
+      Test.equals("a file URI round-trips", &Uri.pathOfFileUri(Uri.fileUri("/tmp/x #1?.pudu")), &Some("/tmp/x #1?.pudu")),
+      Test.equals("another scheme is no file", &Uri.pathOfFileUri("https://x"), &None),
+      Test.equals("a resource path drops its scheme", &Uri.resourcePath("pudu://docs/errors", "pudu://"), &Some("docs/errors")),
+      Test.equals("a foreign scheme has no resource path", &Uri.resourcePath("file:///x", "pudu://"), &None)
+    ])
+  let ran = Test.run(&checks)
+  for failure in Test.failuresOf(&ran) {
+    let _reported = Io.writeErrorLine(failure)
+  }
+  Test.report(&ran)
+}

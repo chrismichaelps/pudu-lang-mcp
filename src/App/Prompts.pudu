@@ -1,0 +1,42 @@
+/** @App.Prompts.Handler — lists and renders prompt templates */
+module App.Prompts
+
+import Std.Json as Json
+import App.Context as Context
+import Constants.Protocol as Protocol
+import Constants.Server as Server
+import Domain.Catalog.Prompts as Prompts
+import Domain.Protocol.Pagination as Pagination
+import Domain.Rpc.Reply as Reply
+import Errors.RpcError as RpcError
+import Utils.JsonAccess as Access
+
+/// Answers one page of the prompts.
+export fn list(context: &Context.Context, params: &Json.Json) -> Result[Json.Json, RpcError.ProtocolError] {
+  let cursor = Pagination.cursorOf(params) ?
+  let paged = Pagination.page(&Prompts.all(), &cursor, Server.PAGE_SIZE) ?
+  var fields = [("prompts", Json.list(&paged[0].map(|spec: Prompts.PromptSpec| Prompts.toJson(&spec))))]
+  if let Some(next) = paged[1] { fields = fields.push(("nextCursor", Json.Text(next))) }
+  Ok(Reply.complete(&fields, &Reply.Cached(Server.LIST_TTL_MS, Protocol.CACHE_PUBLIC)))
+}
+
+/// Answers one prompt rendered with its arguments.
+export fn get(context: &Context.Context, params: &Json.Json) -> Result[Json.Json, RpcError.ProtocolError] {
+  let name = match Access.text(params, "name") {
+    case Some(given) => given
+    case None => { return Err(RpcError.InvalidParams("name must be a string")) }
+  }
+  let arguments = match Access.member(params, "arguments") {
+    case None => Json.object(&[])
+    case Some(Json.Object(fields)) => Json.Object(fields)
+    case Some(_) => { return Err(RpcError.InvalidParams("arguments must be an object")) }
+  }
+  let rendered = Prompts.render(name, &arguments) ?
+  Ok(Reply.complete(&[
+        ("description", Json.Text(rendered[0])),
+        ("messages", Json.list(&[Json.object(&[
+                  ("role", Json.Text("user")),
+                  ("content", Json.object(&[("type", Json.Text("text")), ("text", Json.Text(rendered[1]))]))
+                ])]))
+      ], &Reply.NoCache))
+}

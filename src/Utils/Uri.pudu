@@ -1,0 +1,21 @@
+/** @Utils.Uri.Helper — file and resource URI conversion */
+module Utils.Uri
+
+/// The prefix of every file URI.
+const FILE_SCHEME: Str = "file://"
+
+/// The `file://` URI of an absolute path.
+export fn fileUri(path: Str) -> Str {
+  FILE_SCHEME + path.replace("%", "%25").replace(" ", "%20").replace("#", "%23").replace("?", "%3F")
+}
+
+/// The path a `file://` URI names, or `None` for any other scheme.
+export fn pathOfFileUri(uri: Str) -> Option[Str] {
+  if !uri.startsWith(FILE_SCHEME) { return None }
+  Some(uri.drop(FILE_SCHEME.length()).replace("%20", " ").replace("%23", "#").replace("%3F", "?").replace("%25", "%"))
+}
+
+/// The part of a URI after `scheme`, or `None` when it has another scheme.
+export fn resourcePath(uri: Str, scheme: Str) -> Option[Str] {
+  if uri.startsWith(scheme) { Some(uri.drop(scheme.length())) } else { None }
+}

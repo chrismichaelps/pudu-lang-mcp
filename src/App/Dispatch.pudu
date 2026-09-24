@@ -1,0 +1,85 @@
+/** @App.Dispatch.Backbone — answers one input line under the session */
+module App.Dispatch
+
+import Std.Json as Json
+import Std.Map as Map
+import Std.Text as Text
+import App.Completion as Completion
+import App.Context as Context
+import App.Discovery as Discovery
+import App.Prompts as Prompts
+import App.Resources as Resources
+import App.Tools.Registry as Registry
+import Constants.Server as Server
+import Domain.Protocol.Negotiation as Negotiation
+import Domain.Rpc.Message as Message
+import Domain.Rpc.Reply as Reply
+import Errors.RpcError as RpcError
+
+/** @App.Dispatch.State — the session carried between input lines */
+export type State = { session: Negotiation.Session }
+
+/// The method a legacy client checks the connection with.
+const PING: Str = "ping"
+
+/// The state before any input.
+export fn initial() -> State {
+  State{session: Negotiation.Unopened}
+}
+
+/// The handler of every stateless method, by method name.
+export fn routes() -> Map[Str, fn(&Context.Context, &Json.Json) -> Result[Json.Json, RpcError.ProtocolError]] {
+  mapOf([
+      ("server/discover", Discovery.discover),
+      ("tools/list", Registry.list),
+      ("tools/call", Registry.call),
+      ("resources/list", Resources.list),
+      ("resources/templates/list", Resources.templates),
+      ("resources/read", Resources.read),
+      ("prompts/list", Prompts.list),
+      ("prompts/get", Prompts.get),
+      ("completion/complete", Completion.complete)
+    ])
+}
+
+/// The next state and every reply line for one input line.
+export fn respond(context: &Context.Context, state: &State, line: Str) -> (State, Array[Str]) {
+  if line.toBytes().length() > Server.MAX_LINE_BYTES {
+    return (*state, [Reply.failure(&None, &RpcError.InvalidRequest("a message may be at most " + show(Server.MAX_LINE_BYTES) + " bytes"))])
+  }
+  if Text.isBlank(line) { return (*state, []) }
+  match Message.parse(line) {
+    case Message.Refused(id, problem) => (*state, [Reply.failure(&id, &problem)])
+    case Message.ClientResponse => (*state, [])
+    case Message.Notification(_, _) => (*state, [])
+    case Message.Request(id, method, params) => request(context, state, id, method, &params)
+  }
+}
+
+/// The next state and the reply for one admitted or refused request.
+fn request(context: &Context.Context, state: &State, id: Message.RequestId, method: Str, params: &Json.Json) -> (State, Array[Str]) {
+  let era = match Negotiation.admit(&state.session, method, params) {
+    case Ok(admitted) => admitted
+    case Err(problem) => { return (*state, [Reply.failure(&Some(id), &problem)]) }
+  }
+  let unknown = Reply.failure(&Some(id), &RpcError.MethodNotFound(method))
+  if Negotiation.isHandshake(method) {
+    return match era {
+      case Negotiation.LegacyEra(version) => (State{session: Negotiation.Legacy(version)}, [Reply.result(&id, &Discovery.initialize(version))])
+      case Negotiation.Modern => (*state, [unknown])
+    }
+  }
+  if method == PING {
+    return match era {
+      case Negotiation.LegacyEra(_) => (*state, [Reply.result(&id, &Discovery.pong())])
+      case Negotiation.Modern => (*state, [unknown])
+    }
+  }
+  match Map.get(&routes(), method) {
+    case Some(handler) => match handler(context, params) {
+      case Ok(body) => (*state, [Reply.result(&id, &body)])
+      case Err(problem) => (*state, [Reply.failure(&Some(id), &problem)])
+    }
+    case None => (*state, [unknown])
+  }
+}
