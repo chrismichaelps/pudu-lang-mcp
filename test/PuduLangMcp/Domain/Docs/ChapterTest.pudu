@@ -45,7 +45,8 @@ fn main() -> Int {
       Test.equals("the language guide has its chapters", &Chapter.inGroup(&Docs.CHAPTERS, "docs").length(), &24),
       Test.that("every document has a title", Docs.CHAPTERS.filter(|held: Chapter.Chapter| held.title.isEmpty()).isEmpty()),
       Test.that("the contents list every document", Chapter.tableOfContents(&Docs.CHAPTERS).contains("releases/0.1.1")),
-      Test.that("the corpus keeps literal braces", Option.unwrapOr(Chapter.find(&Docs.CHAPTERS, "docs", "text"), sample).markdown.contains("\{"))
+      Test.that("the corpus keeps literal braces", Option.unwrapOr(Chapter.find(&Docs.CHAPTERS, "docs", "text"), sample).markdown.contains("\{")),
+      Test.that("the collections chapter names the Option-answering get", Option.unwrapOr(Chapter.find(&Docs.CHAPTERS, "docs", "collections"), sample).markdown.contains("`List.get(&items, i)` from `Std.List` answers an `Option`"))
     ])
   let ran = Test.run(&checks)
   for failure in Test.failuresOf(&ran) {
