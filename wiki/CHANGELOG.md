@@ -14,6 +14,8 @@ tags: [changelog]
 - `test/Package/LayoutTest` refuses a shipped module outside the root or misnamed for its path
   ([[architecture/TESTING]]); the rule is an architectural law in [[grammar/pudu]].
 - The package version is 0.1.1; the mirror is indexed from [[src/PuduLangMcp/_MOC]].
+- Released 0.1.0 and 0.1.1; www.pudu-lang.org lists the package with 0.1.1 as latest
+  ([[handoffs/2026-09-23-package-publication]]).
 
 ## 2026-09-23 — Publication baseline
 
