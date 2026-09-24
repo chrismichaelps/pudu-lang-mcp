@@ -1,0 +1,32 @@
+/** @App.Tools.Status.Handler — reports the toolchain and server state */
+module PuduLangMcp.App.Tools.Status
+
+import Std.Option as Option
+import Std.Result as Result
+import Std.Sync as Sync
+import PuduLangMcp.App.Context as Context
+import PuduLangMcp.Constants.Server as Server
+import PuduLangMcp.Domain.Catalog.Arguments as Arguments
+import PuduLangMcp.Errors.ToolError as ToolError
+
+/// Answers the server's version, toolchain, library, workspace, index, and corpus.
+export fn toolchain(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure] {
+  let compiler = match context.toolchain.compiler {
+    case Some(path) => path + " (" + (if context.toolchain.version.isEmpty() { "version unknown" } else { "pudu " + context.toolchain.version }) + ")"
+    case None => "not found. " + ToolError.explain(&ToolError.ToolchainMissing)
+  }
+  let index = match Result.unwrapOr(Sync.get(&context.index), Context.Broken("unreadable")) {
+    case Context.Building => "building"
+    case Context.Ready(entries) => "ready, " + show(entries.length()) + " public declarations"
+    case Context.Broken(reason) => "unavailable: " + reason
+  }
+  Ok([
+      "server: " + Server.SERVER_NAME + " " + Server.SERVER_VERSION,
+      "compiler: " + compiler,
+      "standard library: " + Option.unwrapOr(context.toolchain.library, "not found"),
+      "workspace: " + context.workspace.root,
+      "importable modules: " + show(context.moduleFiles.length()),
+      "reference index: " + index,
+      "documentation: " + show(context.chapters.length()) + " documents, revision " + context.docsRevision
+    ].join("\n"))
+}

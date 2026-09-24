@@ -1,0 +1,37 @@
+/** @Errors.ToolError.Module — recoverable tool execution failures */
+module PuduLangMcp.Errors.ToolError
+
+import PuduLangMcp.Constants.Server as Server
+
+/** @Errors.ToolError.ToolFailure — failures reported as tool results */
+export type ToolFailure
+  = MissingArgument(Str)
+  | WrongType(Str, Str)
+  | UnknownArgument(Str)
+  | OutOfRange(Str, Str)
+  | NotAnObject
+  | ExactlyOne(Array[Str])
+  | ToolchainMissing
+  | OutsideWorkspace(Str)
+  | NotFound(Str)
+  | TimedOut(Str, Int)
+  | CommandFailed(Str)
+  | Unavailable(Str)
+
+/// One sentence saying what went wrong and what to do next.
+export fn explain(failure: &ToolFailure) -> Str {
+  match failure {
+    case MissingArgument(name) => "Missing required argument '" + name + "'."
+    case WrongType(name, expected) => "Argument '" + name + "' must be " + expected + "."
+    case UnknownArgument(name) => "Unknown argument '" + name + "'; remove it."
+    case OutOfRange(name, allowed) => "Argument '" + name + "' must be " + allowed + "."
+    case NotAnObject => "Arguments must be a JSON object."
+    case ExactlyOne(names) => "Give exactly one of " + names.map(|name: Str| "'" + name + "'").join(" or ") + "."
+    case ToolchainMissing => "The pudu compiler was not found. Install it from https://www.pudu-lang.org/download and put it on PATH, or set " + Server.ENV_PUDU_BIN + " to its path."
+    case OutsideWorkspace(path) => "'" + path + "' is not an existing path inside the workspace. Use a path relative to the workspace root, or pass the code as 'source'."
+    case NotFound(what) => what + " was not found."
+    case TimedOut(command, millis) => "'" + command + "' did not finish within " + show(millis) + " ms and was stopped."
+    case CommandFailed(detail) => "The command could not be started: " + detail
+    case Unavailable(reason) => reason
+  }
+}

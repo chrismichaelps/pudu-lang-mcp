@@ -1,0 +1,56 @@
+/** @Domain.Rpc.Reply.Module — encodes results and errors as lines */
+module PuduLangMcp.Domain.Rpc.Reply
+
+import Std.Json as Json
+import Std.Math as Math
+import PuduLangMcp.Constants.Protocol as Protocol
+import PuduLangMcp.Constants.Server as Server
+import PuduLangMcp.Domain.Rpc.Message as Message
+import PuduLangMcp.Errors.RpcError as RpcError
+
+/** @Domain.Rpc.Reply.Cache — caching hint for complete results */
+export type Cache = NoCache | Cached(Int, Str)
+
+/// A complete result body: the given fields plus `resultType`, `serverInfo`, and any cache hint.
+export fn complete(fields: &Array[(Str, Json.Json)], cache: &Cache) -> Json.Json {
+  let identity = Json.object(&[
+      ("name", Json.Text(Server.SERVER_NAME)),
+      ("title", Json.Text(Server.SERVER_TITLE)),
+      ("version", Json.Text(Server.SERVER_VERSION))
+    ])
+  var all = [("resultType", Json.Text(Protocol.RESULT_COMPLETE))].concat(*fields)
+  match cache {
+    case Cached(ttl, visibility) => {
+      all = all.concat([("ttlMs", Json.Number(Math.max(ttl, 0))), ("cacheScope", Json.Text(visibility))])
+    }
+    case NoCache => ()
+  }
+  Json.object(&all.push((Protocol.META_KEY, Json.object(&[(Protocol.META_SERVER_INFO, identity)]))))
+}
+
+/// The reply line carrying a result.
+export fn result(id: &Message.RequestId, body: &Json.Json) -> Str {
+  Json.encode(&Json.object(&[
+        ("jsonrpc", Json.Text(Protocol.JSONRPC_VERSION)),
+        ("id", Message.idJson(id)),
+        ("result", *body)
+      ]))
+}
+
+/// The reply line carrying an error; the id is `null` when it could not be read.
+export fn failure(id: &Option[Message.RequestId], problem: &RpcError.ProtocolError) -> Str {
+  var error = [
+    ("code", Json.Number(RpcError.code(problem))),
+    ("message", Json.Text(RpcError.message(problem)))
+  ]
+  if let Some(extra) = RpcError.data(problem) { error = error.push(("data", extra)) }
+  let shownId = match id {
+    case Some(found) => Message.idJson(&found)
+    case None => Json.Null
+  }
+  Json.encode(&Json.object(&[
+        ("jsonrpc", Json.Text(Protocol.JSONRPC_VERSION)),
+        ("id", shownId),
+        ("error", Json.object(&error))
+      ]))
+}

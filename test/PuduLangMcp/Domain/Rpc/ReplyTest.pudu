@@ -1,0 +1,60 @@
+/** @Test.Domain.Rpc.ReplyTest.Suite — reply encoding and result fields */
+module PuduLangMcp.Domain.Rpc.ReplyTest
+
+import Std.Io as Io
+import Std.Json as Json
+import Std.Result as Result
+import Std.Test as Test
+import PuduLangMcp.Constants.Protocol as Protocol
+import PuduLangMcp.Constants.Server as Server
+import PuduLangMcp.Domain.Rpc.Message as Message
+import PuduLangMcp.Domain.Rpc.Reply as Reply
+import PuduLangMcp.Errors.RpcError as RpcError
+import PuduLangMcp.Utils.JsonAccess as Access
+
+/// A reply line decoded back to JSON.
+fn decoded(line: Str) -> Json.Json {
+  Result.unwrapOr(Json.decode(line), Json.Null)
+}
+
+/// The first version an unsupported-version error lists.
+fn firstSupported(reply: &Json.Json) -> Option[Json.Json] {
+  let supported = Json.path(reply, &["error", "data", "supported"]) ?
+  Json.at(&supported, 0)
+}
+
+/// Runs the suite.
+fn main() -> Int {
+  let plain = Reply.complete(&[("value", Json.Number(1))], &Reply.NoCache)
+  let cached = Reply.complete(&[], &Reply.Cached(5000, Protocol.CACHE_PUBLIC))
+  let clamped = Reply.complete(&[], &Reply.Cached(-10, Protocol.CACHE_PRIVATE))
+  let line = Reply.result(&Message.NumberId(3), &Json.object(&[("text", Json.Text("a\nb"))]))
+  let failed = decoded(Reply.failure(&None, &RpcError.ParseError("bad")))
+  let versioned = decoded(Reply.failure(&Some(Message.TextId("x")), &RpcError.UnsupportedVersion("1900-01-01")))
+  let missing = decoded(Reply.failure(&Some(Message.NumberId(1)), &RpcError.ResourceNotFound("pudu://nope")))
+  let checks = Test.suite("Domain.Rpc.Reply", &[
+      Test.equals("a complete result carries its result type", &Access.text(&plain, "resultType"), &Some("complete")),
+      Test.equals("a complete result keeps its fields", &Access.integer(&plain, "value"), &Some(1)),
+      Test.equals("a complete result names the server", &Access.pathText(&plain, &["_meta", Protocol.META_SERVER_INFO, "name"]), &Some(Server.SERVER_NAME)),
+      Test.equals("an uncached result has no ttl", &Access.member(&plain, "ttlMs"), &None),
+      Test.equals("a cached result carries its ttl", &Access.integer(&cached, "ttlMs"), &Some(5000)),
+      Test.equals("a cached result carries its scope", &Access.text(&cached, "cacheScope"), &Some("public")),
+      Test.equals("a negative ttl is written as zero", &Access.integer(&clamped, "ttlMs"), &Some(0)),
+      Test.that("a reply is one line even when its text has line breaks", !line.contains("\n")),
+      Test.equals("a result reply keeps its id", &Access.integer(&decoded(line), "id"), &Some(3)),
+      Test.equals("a result reply is JSON-RPC 2.0", &Access.text(&decoded(line), "jsonrpc"), &Some("2.0")),
+      Test.equals("an unknown id is written as null", &Access.member(&failed, "id"), &Some(Json.Null)),
+      Test.equals("an error carries its code", &Access.pathInt(&failed, &["error", "code"]), &Some(Protocol.PARSE_ERROR)),
+      Test.equals("an error without data has no data member", &Json.path(&failed, &["error", "data"]), &None),
+      Test.equals("a failure never carries a result", &Access.member(&failed, "result"), &None),
+      Test.equals("a version error names what was requested", &Access.pathText(&versioned, &["error", "data", "requested"]), &Some("1900-01-01")),
+      Test.equals("a version error lists the modern version first", &firstSupported(&versioned), &Some(Json.Text(Protocol.MODERN_VERSION))),
+      Test.equals("a missing resource is invalid params", &Access.pathInt(&missing, &["error", "code"]), &Some(Protocol.INVALID_PARAMS)),
+      Test.equals("a missing resource names its uri", &Access.pathText(&missing, &["error", "data", "uri"]), &Some("pudu://nope"))
+    ])
+  let ran = Test.run(&checks)
+  for failure in Test.failuresOf(&ran) {
+    let _reported = Io.writeErrorLine(failure)
+  }
+  Test.report(&ran)
+}

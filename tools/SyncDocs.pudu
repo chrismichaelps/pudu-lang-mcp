@@ -8,7 +8,7 @@ import Std.Option as Option
 import Std.Text as Text
 
 /// Where the generated corpus is written.
-const DOCS_OUTPUT: Str = "src/Generated/Docs.pudu"
+const DOCS_OUTPUT: Str = "src/PuduLangMcp/Generated/Docs.pudu"
 /// The first line of the generated module.
 const HEADER: Str = "/** @Generated.Docs.Corpus — published Pudu prose, generated; do not edit */\n"
 
@@ -51,7 +51,7 @@ fn main() -> Int {
     case Ok(found) => { documents = documents.concat(found) }
     case Err(problem) => { return failed(problem) }
   }
-  let docsModule = HEADER + "module Generated.Docs\n\nimport Domain.Docs.Chapter as Chapter\n\nexport const REVISION: Str = " + literal(revision) + "\n\nexport const CHAPTERS: Array[Chapter.Chapter] = [\n" + documents.map(|held: Document| documentLiteral(&held)).join(",\n") + "\n]\n"
+  let docsModule = HEADER + "module PuduLangMcp.Generated.Docs\n\nimport PuduLangMcp.Domain.Docs.Chapter as Chapter\n\nexport const REVISION: Str = " + literal(revision) + "\n\nexport const CHAPTERS: Array[Chapter.Chapter] = [\n" + documents.map(|held: Document| documentLiteral(&held)).join(",\n") + "\n]\n"
   match Io.write(DOCS_OUTPUT, docsModule) {
     case Ok(_) => ()
     case Err(problem) => { return failed("cannot write " + DOCS_OUTPUT + ": " + problem) }

@@ -27,7 +27,7 @@ pudu run tools/Mutate.pudu [--every N] [--threshold P] [--dry-run] [--file src/.
 - `--every N` keeps every Nth mutant (deterministic sampling), default 1.
 - `--threshold P` exits 1 when the score is below P percent, default 0.
 - `--dry-run` lists the mutants without running anything.
-- `--file` limits mutation to one file; default every file under `src/` except `src/Generated/`
+- `--file` limits mutation to one file; default every file under `src/` except `src/PuduLangMcp/Generated/`
   and `src/Main.pudu`.
 
 The compiler is `PUDU_BIN` or `pudu` on the search path.

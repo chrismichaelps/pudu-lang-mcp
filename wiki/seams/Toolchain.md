@@ -9,11 +9,11 @@ tags: [seam, backbone]
 ## Classification
 
 Effect boundary between the protocol core and the installed compiler. A record of functions,
-`Services.Toolchain.Toolchain`, built once by `Main`.
+`PuduLangMcp.Services.Toolchain.Toolchain`, built once by `Main`.
 
 ## Adapters
 
-- **Installed** — [[src/Services/Toolchain]] over [[src/Services/Process/Bounded]].
+- **Installed** — [[src/PuduLangMcp/Services/Toolchain]] over [[src/PuduLangMcp/Services/Process/Bounded]].
 - **Scripted** — built in tests: each function answers a fixed `Outcome`, so dispatch, argument
   handling, and rendering are tested without a compiler.
 

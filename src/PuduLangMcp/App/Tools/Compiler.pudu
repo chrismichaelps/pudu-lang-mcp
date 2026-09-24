@@ -1,0 +1,83 @@
+/** @App.Tools.Compiler.Handler — check, format, lint, run, and test tools */
+module PuduLangMcp.App.Tools.Compiler
+
+import Std.Option as Option
+import Std.Path as Path
+import PuduLangMcp.App.Context as Context
+import PuduLangMcp.Constants.Server as Server
+import PuduLangMcp.Domain.Catalog.Arguments as Arguments
+import PuduLangMcp.Errors.ToolError as ToolError
+import PuduLangMcp.Services.Workspace as Workspace
+import PuduLangMcp.Utils.TextBounds as TextBounds
+
+/// Answers the compiler's diagnostics for the code.
+export fn check(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure] {
+  onTarget(context, args, ["check"], Server.COMMAND_TIMEOUT_MS, fn(status: Int, said: Str) -> Str { said })
+}
+
+/// Answers the code as the formatter lays it out.
+export fn format(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure] {
+  onTarget(context, args, ["fmt", "--stdout"], Server.COMMAND_TIMEOUT_MS, fn(status: Int, said: Str) -> Str {
+      if status == 0 { said } else { "The code could not be formatted:\n" + said }
+    })
+}
+
+/// Answers the linter's findings for the code.
+export fn lint(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure] {
+  onTarget(context, args, ["lint"], Server.COMMAND_TIMEOUT_MS, fn(status: Int, said: Str) -> Str { said })
+}
+
+/// Answers a confined run's exit status and output.
+export fn run(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure] {
+  let millis = Arguments.integerOr(args, "timeoutMs", Server.RUN_TIMEOUT_MS)
+  onTarget(context, args, ["run", "--confined"], millis, fn(status: Int, said: Str) -> Str {
+      "exit status " + show(status) + (if said.isEmpty() { "" } else { "\n" + said })
+    })
+}
+
+/// Answers the report of the workspace's tests, or of those under one path.
+export fn test(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure] {
+  if context.toolchain.compiler == None { return Err(ToolError.ToolchainMissing) }
+  let millis = Arguments.integerOr(args, "timeoutMs", Server.RUN_TIMEOUT_MS)
+  let arguments = match Arguments.text(args, "path") {
+    case Some(given) => {
+      let real = Workspace.resolve(&context.workspace, given) ?
+      ["test", Workspace.relative(&context.workspace, real)]
+    }
+    case None => ["test"]
+  }
+  let done = match context.toolchain.run(arguments, "", context.workspace.root, millis, Server.OUTPUT_CAP_BYTES) {
+    case Ok(finished) => finished
+    case Err(problem) => { return Err(ToolError.CommandFailed(problem)) }
+  }
+  Ok(stopped(done.timedOut, millis) + combined(done.output, done.errors, ""))
+}
+
+/// Runs a command on the code `source` or `path` names and renders what it wrote.
+fn onTarget(context: &Context.Context, args: &Arguments.Args, command: Array[Str], millis: Int, render: fn(Int, Str) -> Str) -> Result[Str, ToolError.ToolFailure] {
+  if context.toolchain.compiler == None { return Err(ToolError.ToolchainMissing) }
+  let toolchain = context.toolchain
+  let answered = Workspace.withTarget(&context.workspace, Arguments.text(args, "source"), Arguments.text(args, "path"), fn(target: Workspace.Target) -> Result[Str, ToolError.ToolFailure] {
+      let file = Option.unwrapOr(Path.relativeTo(target.directory, target.file), target.file)
+      match toolchain.run(command.push(file), "", target.directory, millis, Server.OUTPUT_CAP_BYTES) {
+        case Ok(done) => {
+          let hidden = if target.scratch { target.directory + "/" } else { "" }
+          Ok(stopped(done.timedOut, millis) + render(done.status, combined(done.output, done.errors, hidden)))
+        }
+        case Err(problem) => Err(ToolError.CommandFailed(problem))
+      }
+    }) ?
+  answered
+}
+
+/// A line saying a command was stopped, or nothing.
+fn stopped(timedOut: Bool, millis: Int) -> Str {
+  if timedOut { "Stopped after " + show(millis) + " ms; the output so far follows.\n" } else { "" }
+}
+
+/// Standard output then standard error, trimmed, bounded, without a hidden path prefix.
+fn combined(output: Str, errors: Str, hidden: Str) -> Str {
+  let both = if output.trim().isEmpty() { errors.trim() } else if errors.trim().isEmpty() { output.trim() } else { output.trim() + "\n" + errors.trim() }
+  let shown = if hidden.isEmpty() { both } else { both.replace(hidden, "") }
+  TextBounds.bounded(shown, Server.DOC_CHARS)
+}

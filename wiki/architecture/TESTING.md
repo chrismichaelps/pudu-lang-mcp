@@ -11,9 +11,10 @@ and each suite names its failed checks on stderr.
 
 | Level | Suites | What they prove |
 | --- | --- | --- |
-| Domain | `test/Domain/**`, `test/Utils`, `test/Errors` | every rule of each pure module, success and refusal, boundaries and malformed input |
-| Application | `test/App/DispatchTest`, `test/App/ToolsTest` | the whole protocol through a scripted [[seams/Toolchain]]: both eras, every method, every tool, confinement, scratch clean-up, timeouts, a missing compiler |
-| Services | `test/Services/ServicesTest` | real processes (status, streams, deadline, cap, UTF-8 cuts) and real directory layouts (library discovery, installed packages) |
+| Domain | `test/PuduLangMcp/Domain/**`, `test/PuduLangMcp/Utils`, `test/PuduLangMcp/Errors` | every rule of each pure module, success and refusal, boundaries and malformed input |
+| Application | `test/PuduLangMcp/App/DispatchTest`, `test/PuduLangMcp/App/ToolsTest` | the whole protocol through a scripted [[seams/Toolchain]]: both eras, every method, every tool, confinement, scratch clean-up, timeouts, a missing compiler |
+| Services | `test/PuduLangMcp/Services/ServicesTest` | real processes (status, streams, deadline, cap, UTF-8 cuts) and real directory layouts (library discovery, installed packages) |
+| Package | `test/Package/LayoutTest` | every shipped module is the root `PuduLangMcp` or under it, is named after its path, and agrees with the manifest's `root` |
 | End to end | `test/Integration/ServerTest` | the real server over stdio with the installed compiler: one reply line per request, real diagnostics, hover, confined runs, and reference |
 | Mutation | [[tools/Mutate]] | the suites notice single-point changes to the source |
 

@@ -15,7 +15,7 @@ read files.
 ## Decision
 
 `tools/SyncDocs.pudu` reads the published prose from a pudu-lang checkout — the language guide,
-site pages, release notes, and playground examples — and writes `src/Generated/Docs.pudu`: one `const` array of chapters with their slug,
+site pages, release notes, and playground examples — and writes `src/PuduLangMcp/Generated/Docs.pudu`: one `const` array of chapters with their slug,
 title, and Markdown, escaped for Pudu string literals. The server splits chapters into sections at
 start-up. The generated file records the documentation revision it came from.
 
@@ -40,4 +40,4 @@ start-up. The generated file records the documentation revision it came from.
 
 ## Referenced by
 
-[[decisions/_MOC]] · [[src/Generated/Docs]]
+[[decisions/_MOC]] · [[src/PuduLangMcp/Generated/Docs]]

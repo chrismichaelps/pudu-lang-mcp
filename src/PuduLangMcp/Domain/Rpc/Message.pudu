@@ -1,0 +1,81 @@
+/** @Domain.Rpc.Message.Module — classifies one JSON-RPC input line */
+module PuduLangMcp.Domain.Rpc.Message
+
+import Std.Json as Json
+import PuduLangMcp.Constants.Protocol as Protocol
+import PuduLangMcp.Errors.RpcError as RpcError
+import PuduLangMcp.Utils.JsonAccess as Access
+
+/** @Domain.Rpc.Message.RequestId — string or integer request identity */
+export type RequestId = NumberId(Int) | TextId(Str)
+
+/** @Domain.Rpc.Message.Incoming — one classified input line */
+export type Incoming
+  = Request(RequestId, Str, Json.Json)
+  | Notification(Str, Json.Json)
+  | ClientResponse
+  | Refused(Option[RequestId], RpcError.ProtocolError)
+
+/// What reading the `id` member found.
+type IdReading = NoId | ValidId(RequestId) | BadId(Str)
+
+/// One input line classified as a request, notification, response, or refusal.
+export fn parse(line: Str) -> Incoming {
+  let value = match Json.decode(line.trim()) {
+    case Ok(decoded) => decoded
+    case Err(problem) => { return Refused(None, RpcError.ParseError(Json.explain(&problem))) }
+  }
+  match value {
+    case Json.List(_) => { return Refused(None, RpcError.InvalidRequest("batched messages are not supported")) }
+    case Json.Object(_) => ()
+    case _ => { return Refused(None, RpcError.InvalidRequest("a message must be a JSON object")) }
+  }
+  let id = match readId(&value) {
+    case BadId(reason) => { return Refused(None, RpcError.InvalidRequest(reason)) }
+    case ValidId(found) => Some(found)
+    case NoId => None
+  }
+  if Access.text(&value, "jsonrpc") != Some(Protocol.JSONRPC_VERSION) {
+    return Refused(id, RpcError.InvalidRequest("jsonrpc must be \"2.0\""))
+  }
+  let method = match Access.member(&value, "method") {
+    case Some(Json.Text(name)) => name
+    case Some(_) => { return Refused(id, RpcError.InvalidRequest("method must be a string")) }
+    case None => {
+      let answered = Access.member(&value, "result") != None || Access.member(&value, "error") != None
+      if answered { return ClientResponse }
+      return Refused(id, RpcError.InvalidRequest("method must be a string"))
+    }
+  }
+  let params = match Access.member(&value, "params") {
+    case None => Json.object(&[])
+    case Some(Json.Object(fields)) => Json.Object(fields)
+    case Some(_) => match id {
+      case Some(_) => { return Refused(id, RpcError.InvalidParams("params must be an object")) }
+      case None => Json.object(&[])
+    }
+  }
+  match id {
+    case Some(found) => Request(found, method, params)
+    case None => Notification(method, params)
+  }
+}
+
+/// A request id as the JSON it arrived as.
+export fn idJson(id: &RequestId) -> Json.Json {
+  match id {
+    case NumberId(number) => Json.Number(number)
+    case TextId(text) => Json.Text(text)
+  }
+}
+
+/// The `id` member, validated.
+fn readId(value: &Json.Json) -> IdReading {
+  match Access.member(value, "id") {
+    case None => NoId
+    case Some(Json.Number(number)) => ValidId(NumberId(number))
+    case Some(Json.Text(text)) => ValidId(TextId(text))
+    case Some(Json.Null) => BadId("id must not be null")
+    case Some(_) => BadId("id must be a string or an integer")
+  }
+}

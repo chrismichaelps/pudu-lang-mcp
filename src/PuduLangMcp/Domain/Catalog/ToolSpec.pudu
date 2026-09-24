@@ -1,0 +1,82 @@
+/** @Domain.Catalog.ToolSpec.Aggregate — tool definitions held as data */
+module PuduLangMcp.Domain.Catalog.ToolSpec
+
+import Std.Json as Json
+import PuduLangMcp.Utils.JsonAccess as Access
+
+/** @Domain.Catalog.ToolSpec.Kind — JSON kind of one argument */
+export type Kind = TextKind | IntegerKind | BooleanKind
+
+/** @Domain.Catalog.ToolSpec.Property — one declared tool argument */
+export type Property = { name: Str, kind: Kind, description: Str, required: Bool, minimum: Option[Int], maximum: Option[Int] }
+
+/** @Domain.Catalog.ToolSpec.Annotations — behaviour hints every tool declares */
+export type Annotations = { readOnly: Bool, destructive: Bool, idempotent: Bool, openWorld: Bool }
+
+/** @Domain.Catalog.ToolSpec.ToolSpec — one tool described once */
+export type ToolSpec = {
+  name: Str,
+  title: Str,
+  description: Str,
+  properties: Array[Property],
+  exactlyOne: Array[Str],
+  annotations: Annotations
+}
+
+/// A string argument.
+export fn text(name: Str, description: Str, required: Bool) -> Property {
+  Property{name: name, kind: TextKind, description: description, required: required, minimum: None, maximum: None}
+}
+
+/// An integer argument bounded to `minimum..maximum`.
+export fn integer(name: Str, description: Str, required: Bool, minimum: Int, maximum: Int) -> Property {
+  Property{name: name, kind: IntegerKind, description: description, required: required, minimum: Some(minimum), maximum: Some(maximum)}
+}
+
+/// The JSON Schema type name of an argument kind.
+export fn kindName(kind: &Kind) -> Str {
+  match kind {
+    case TextKind => "string"
+    case IntegerKind => "integer"
+    case BooleanKind => "boolean"
+  }
+}
+
+/// A tool as `tools/list` describes it.
+export fn toJson(spec: &ToolSpec) -> Json.Json {
+  Json.object(&[
+      ("name", Json.Text(spec.name)),
+      ("title", Json.Text(spec.title)),
+      ("description", Json.Text(spec.description)),
+      ("inputSchema", schema(spec)),
+      ("annotations", Json.object(&[
+            ("title", Json.Text(spec.title)),
+            ("readOnlyHint", Json.Boolean(spec.annotations.readOnly)),
+            ("destructiveHint", Json.Boolean(spec.annotations.destructive)),
+            ("idempotentHint", Json.Boolean(spec.annotations.idempotent)),
+            ("openWorldHint", Json.Boolean(spec.annotations.openWorld))
+          ]))
+    ])
+}
+
+/// The input schema of a tool.
+fn schema(spec: &ToolSpec) -> Json.Json {
+  var fields = [("type", Json.Text("object")), ("additionalProperties", Json.Boolean(false))]
+  if !spec.properties.isEmpty() {
+    fields = fields.push(("properties", Json.object(&spec.properties.map(|held: Property| (held.name, propertyJson(&held))))))
+  }
+  let required = spec.properties.filter(|held: Property| held.required).map(|held: Property| held.name)
+  if !required.isEmpty() { fields = fields.push(("required", Access.texts(&required))) }
+  if !spec.exactlyOne.isEmpty() {
+    fields = fields.push(("oneOf", Json.list(&spec.exactlyOne.map(|name: Str| Json.object(&[("required", Access.texts(&[name]))])))))
+  }
+  Json.object(&fields)
+}
+
+/// The schema of one argument.
+fn propertyJson(held: &Property) -> Json.Json {
+  var fields = [("type", Json.Text(kindName(&held.kind))), ("description", Json.Text(held.description))]
+  if let Some(low) = held.minimum { fields = fields.push(("minimum", Json.Number(low))) }
+  if let Some(high) = held.maximum { fields = fields.push(("maximum", Json.Number(high))) }
+  Json.object(&fields)
+}

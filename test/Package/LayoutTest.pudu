@@ -1,0 +1,68 @@
+/** @Test.Package.LayoutTest.Suite — every shipped module stays under the package's module root */
+module Package.LayoutTest
+
+import Std.Io as Io
+import Std.List as List
+import Std.Result as Result
+import Std.Test as Test
+import Std.Text as Text
+
+/// The module root the manifest declares.
+const ROOT: Str = "PuduLangMcp"
+
+/// The executable entry, the one module allowed beside the root.
+const ENTRY: Str = "src/Main.pudu"
+
+/// Every source file under a directory, sorted.
+fn sources(directory: Str) -> Array[Str] {
+  var found: Array[Str] = []
+  for path in List.sortBy(&Result.unwrapOr(Io.listPaths(directory), []), fn(left: Str, right: Str) -> Bool { left < right }) {
+    if path.endsWith(".pudu") {
+      found = found.push(path)
+    } else if !path.contains(".") {
+      found = found.concat(sources(path))
+    }
+  }
+  found
+}
+
+/// The name a file's `module` line declares, or empty text when it has none.
+fn declared(path: Str) -> Str {
+  let text = Result.unwrapOr(Io.read(path), "")
+  match List.find(&text.split("\n"), |line: Str| line.startsWith("module ")) {
+    case Some(line) => Text.stripPrefix(line, "module ").trim()
+    case None => ""
+  }
+}
+
+/// Whether a module name is the root or inside it.
+fn owned(name: Str) -> Bool {
+  name == ROOT || name.startsWith(ROOT + ".")
+}
+
+/// The module name a path under `src/` must declare.
+fn expected(path: Str) -> Str {
+  Text.stripPrefix(path, "src/").replace(".pudu", "").replace("/", ".")
+}
+
+/// Runs the suite.
+fn main() -> Int {
+  let shipped = sources("src").filter(|path: Str| path != ENTRY)
+  let outside = shipped.filter(|path: Str| !owned(declared(path)))
+  let misnamed = shipped.filter(|path: Str| declared(path) != expected(path))
+  let manifest = Result.unwrapOr(Io.read("pudu.toml"), "")
+  let checks = Test.suite("Package.Layout", &[
+      Test.that("the source tree is found", shipped.length() > 1),
+      Test.equals("every shipped module is under the package root", &outside, &[]),
+      Test.equals("every module is named after its path", &misnamed, &[]),
+      Test.that("the manifest declares the same root", manifest.contains("root = \"" + ROOT + "\"")),
+      Test.equals("the entry stays the executable's Main", &declared(ENTRY), &"Main"),
+      Test.that("a name beside the root is refused", !owned("App.Context") && !owned("PuduLangMcpExtra")),
+      Test.that("the root and its children are owned", owned(ROOT) && owned(ROOT + ".App.Context"))
+    ])
+  let report = Test.run(&checks)
+  for failure in Test.failuresOf(&report) {
+    let _reported = Io.writeErrorLine(failure)
+  }
+  Test.report(&report)
+}

@@ -1,0 +1,43 @@
+/** @Test.Domain.Protocol.PaginationTest.Suite — cursors over list results */
+module PuduLangMcp.Domain.Protocol.PaginationTest
+
+import Std.Io as Io
+import Std.Json as Json
+import Std.Test as Test
+import PuduLangMcp.Constants.Protocol as Protocol
+import PuduLangMcp.Domain.Protocol.Pagination as Pagination
+import PuduLangMcp.Errors.RpcError as RpcError
+
+/// The code a failed page answers, or 0.
+fn failureCode(outcome: &Result[(Array[Int], Option[Str]), RpcError.ProtocolError]) -> Int {
+  match outcome {
+    case Ok(_) => 0
+    case Err(problem) => RpcError.code(&problem)
+  }
+}
+
+/// Runs the suite.
+fn main() -> Int {
+  let items = [1, 2, 3, 4, 5]
+  let checks = Test.suite("Domain.Protocol.Pagination", &[
+      Test.equals("no cursor starts at the beginning", &Pagination.page(&items, &None, 2), &Ok(([1, 2], Some("offset:2")))),
+      Test.equals("a cursor continues where the last page stopped", &Pagination.page(&items, &Some("offset:2"), 2), &Ok(([3, 4], Some("offset:4")))),
+      Test.equals("the last page has no next cursor", &Pagination.page(&items, &Some("offset:4"), 2), &Ok(([5], None))),
+      Test.equals("a page that fits has no next cursor", &Pagination.page(&items, &None, 5), &Ok(([1, 2, 3, 4, 5], None))),
+      Test.equals("an empty list is one empty page", &Pagination.page(&[], &None, 3), &Ok(([], None))),
+      Test.equals("a cursor at the end is invalid", &failureCode(&Pagination.page(&items, &Some("offset:5"), 2)), &Protocol.INVALID_PARAMS),
+      Test.equals("a cursor past the end is invalid", &failureCode(&Pagination.page(&items, &Some("offset:99"), 2)), &Protocol.INVALID_PARAMS),
+      Test.equals("a negative offset is invalid", &failureCode(&Pagination.page(&items, &Some("offset:-1"), 2)), &Protocol.INVALID_PARAMS),
+      Test.equals("a foreign cursor is invalid", &failureCode(&Pagination.page(&items, &Some("eyJwYWdlIjogM30="), 2)), &Protocol.INVALID_PARAMS),
+      Test.equals("a cursor without digits is invalid", &failureCode(&Pagination.page(&items, &Some("offset:"), 2)), &Protocol.INVALID_PARAMS),
+      Test.equals("a cursor with trailing text is invalid", &failureCode(&Pagination.page(&items, &Some("offset:1x"), 2)), &Protocol.INVALID_PARAMS),
+      Test.equals("no cursor parameter reads as none", &Pagination.cursorOf(&Json.object(&[])), &Ok(None)),
+      Test.equals("a string cursor is read", &Pagination.cursorOf(&Json.object(&[("cursor", Json.Text("offset:1"))])), &Ok(Some("offset:1"))),
+      Test.that("a non-string cursor is invalid params", Pagination.cursorOf(&Json.object(&[("cursor", Json.Number(1))])) == Err(RpcError.InvalidParams("cursor must be a string")))
+    ])
+  let ran = Test.run(&checks)
+  for failure in Test.failuresOf(&ran) {
+    let _reported = Io.writeErrorLine(failure)
+  }
+  Test.report(&ran)
+}

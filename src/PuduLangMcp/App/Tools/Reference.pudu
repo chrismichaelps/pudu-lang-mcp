@@ -1,0 +1,63 @@
+/** @App.Tools.Reference.Handler — API search and module reference tools */
+module PuduLangMcp.App.Tools.Reference
+
+import Std.List as List
+import Std.Option as Option
+import PuduLangMcp.App.Context as Context
+import PuduLangMcp.Constants.Server as Server
+import PuduLangMcp.Domain.Catalog.Arguments as Arguments
+import PuduLangMcp.Domain.Reference.Entry as Entry
+import PuduLangMcp.Errors.ToolError as ToolError
+import PuduLangMcp.Services.Reference as Reference
+import PuduLangMcp.Utils.TextBounds as TextBounds
+
+/// What marks a query as a type shape rather than a name.
+const SHAPE_MARK: Str = "->"
+
+/// Most module names suggested for an unknown module.
+const SUGGESTIONS: Int = 8
+
+/// Answers declarations matching a name, description, or type shape.
+export fn search(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure] {
+  let query = Option.unwrapOr(Arguments.text(args, "query"), "").trim()
+  let limit = Arguments.integerOr(args, "limit", Server.DEFAULT_SEARCH_LIMIT)
+  if query.contains(SHAPE_MARK) { return shapeSearch(context, query) }
+  let entries = Context.entries(context) ?
+  let found = Entry.search(&entries, query, limit)
+  if found.isEmpty() { return Ok("No declaration matches '" + query + "'.") }
+  Ok(TextBounds.bounded(found.map(|held: Entry.Found| Entry.render(&held.entry)).join("\n\n"), Server.DOC_CHARS))
+}
+
+/// Answers every public declaration of the module the `module` argument names.
+export fn moduleTool(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure] {
+  moduleText(context, Option.unwrapOr(Arguments.text(args, "module"), "").trim())
+}
+
+/// Every public declaration of one module, rendered.
+export fn moduleText(context: &Context.Context, moduleName: Str) -> Result[Str, ToolError.ToolFailure] {
+  let file = match Reference.fileOf(&context.moduleFiles, moduleName) {
+    case Some(found) => found
+    case None => {
+      let wanted = moduleName.toLower()
+      let near = List.take(&context.moduleFiles.filter(|held: Reference.ModuleFile| held.moduleName.toLower().contains(wanted)), SUGGESTIONS)
+      let hint = if near.isEmpty() { "" } else { " (did you mean: " + near.map(|held: Reference.ModuleFile| held.moduleName).join(", ") + ")" }
+      return Err(ToolError.NotFound("Module '" + moduleName + "'" + hint))
+    }
+  }
+  let entries = Reference.moduleEntries(&context.toolchain, &file) ?
+  Ok(TextBounds.bounded(Entry.renderModule(&entries, moduleName), Server.DOC_CHARS))
+}
+
+/// The compiler's own type-shape search over every importable module.
+fn shapeSearch(context: &Context.Context, query: Str) -> Result[Str, ToolError.ToolFailure] {
+  if context.toolchain.compiler == None { return Err(ToolError.ToolchainMissing) }
+  let arguments = ["search", query].concat(context.moduleFiles.map(|held: Reference.ModuleFile| held.path))
+  match context.toolchain.run(arguments, "", "", Server.REFERENCE_TIMEOUT_MS, Server.OUTPUT_CAP_BYTES) {
+    case Ok(done) => {
+      if done.timedOut { return Err(ToolError.TimedOut("pudu search", Server.REFERENCE_TIMEOUT_MS)) }
+      let said = done.output.trim()
+      Ok(if said.isEmpty() { "No declaration has the shape '" + query + "'." } else { TextBounds.bounded(said, Server.DOC_CHARS) })
+    }
+    case Err(problem) => Err(ToolError.CommandFailed(problem))
+  }
+}
