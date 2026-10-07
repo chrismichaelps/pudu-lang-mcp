@@ -37,6 +37,9 @@ tags: [changelog]
 - A bounded run's reader cells start from, and fall back to, one shared open-stream value, so the
   mutant that used to survive in its unreachable fallback is killed; the full mutation pass has no
   survivor ([[src/PuduLangMcp/Services/Process/Bounded]]).
+- The application tool suite reads a tool's own last call, skipping the `api` and `doc` calls the
+  reference index makes on its own thread, which could land in between and fail the suite at random
+  ([[architecture/TESTING]]).
 - CI and the language range move to Pudu 0.1.3 (`>=0.1.3 <0.2.0`)
   ([[handoffs/2026-10-07-pudu-0-1-3]]).
 

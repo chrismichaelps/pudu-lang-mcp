@@ -78,9 +78,14 @@ fn call(context: &Context.Context, name: Str, arguments: &Array[(Str, Json.Json)
   }
 }
 
-/// The last recorded call.
+/// The commands the reference index runs on its own thread, which can land between a tool's call
+/// and the check that reads it.
+const INDEX_COMMANDS: Set[Str] = setOf(["api", "doc"])
+
+/// The last recorded call a tool made, past the reference index's own.
 fn last(calls: &Sync.Cell[Array[Call]]) -> Call {
-  Option.unwrapOr(List.last(&Result.unwrapOr(Sync.get(calls), [])), Call{arguments: [], input: "", directory: ""})
+  let asked = Result.unwrapOr(Sync.get(calls), []).filter(|held: Call| !INDEX_COMMANDS.contains(Option.unwrapOr(List.first(&held.arguments), "")))
+  Option.unwrapOr(List.last(&asked), Call{arguments: [], input: "", directory: ""})
 }
 
 /// Runs the suite.
