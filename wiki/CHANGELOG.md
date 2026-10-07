@@ -34,6 +34,9 @@ tags: [changelog]
   ([[src/PuduLangMcp/Services/Toolchain]]).
 - `pudu_expand` answers the implementations a file's derives generate
   ([[src/PuduLangMcp/App/Tools/Compiler]]).
+- A bounded run's reader cells start from, and fall back to, one shared open-stream value, so the
+  mutant that used to survive in its unreachable fallback is killed; the full mutation pass has no
+  survivor ([[src/PuduLangMcp/Services/Process/Bounded]]).
 - CI and the language range move to Pudu 0.1.3 (`>=0.1.3 <0.2.0`)
   ([[handoffs/2026-10-07-pudu-0-1-3]]).
 
