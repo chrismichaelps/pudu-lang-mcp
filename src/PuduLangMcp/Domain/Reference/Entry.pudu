@@ -1,6 +1,7 @@
 /** @Domain.Reference.Entry.Aggregate — public declarations and name search */
 module PuduLangMcp.Domain.Reference.Entry
 
+import Std.Char as Char
 import Std.List as List
 import Std.Text as Text
 
@@ -43,10 +44,29 @@ export fn ofModule(entries: &Array[Entry], moduleName: Str) -> Array[Entry] {
   entries.filter(|entry: Entry| entry.moduleName == moduleName)
 }
 
-/// One declaration with its signature and indented documentation.
+/// One declaration with its signature and indented documentation. A signature that is the
+/// declaration itself, such as `type Point = …` or `derive Show for T: Record`, is shown in place
+/// of the name, qualified by the module.
 export fn render(entry: &Entry) -> Str {
-  let head = if entry.signature.isEmpty() { entry.kind + " " + entry.moduleName + "." + entry.name } else { entry.kind + " " + entry.moduleName + "." + entry.name + " :: " + entry.signature }
+  let declared = entry.kind + " " + entry.name
+  let head = if entry.signature.isEmpty() {
+    declared.replace(entry.name, entry.moduleName + "." + entry.name)
+  } else if declares(entry.signature, declared) {
+    entry.kind + " " + entry.moduleName + "." + Text.stripPrefix(entry.signature, entry.kind + " ")
+  } else {
+    entry.kind + " " + entry.moduleName + "." + entry.name + " :: " + entry.signature
+  }
   if entry.doc.isEmpty() { head } else { head + "\n    " + entry.doc.replace("\n", "\n    ") }
+}
+
+/// Whether a signature is the declaration itself: it starts with the kind and name, followed by
+/// something that cannot continue the name.
+fn declares(signature: Str, declared: Str) -> Bool {
+  if !signature.startsWith(declared) { return false }
+  match Text.at(signature, declared.length()) {
+    case Some(next) => !Char.isAlphanumeric(next) && next != '_'
+    case None => true
+  }
 }
 
 /// Every declaration of one module; empty when the module is unknown.

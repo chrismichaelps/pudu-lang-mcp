@@ -39,11 +39,8 @@ export fn locate() -> Toolchain {
     }
     case None => ""
   }
-  let library = match Env.variable(Server.ENV_PUDU_LIB) {
-    case Some(given) => if hasStd(given) { Some(given) } else { Option.andThen(compiler, |path: Str| libraryFrom(path)) }
-    case None => Option.andThen(compiler, |path: Str| libraryFrom(path))
-  }
-  Toolchain{compiler: compiler, library: library, version: version, run: runner}
+  let named = [Env.variable(Server.ENV_PUDU_MCP_LIB), Env.variable(Server.ENV_PUDU_LIB)]
+  Toolchain{compiler: compiler, library: chooseLibrary(&named, compiler), version: version, run: runner}
 }
 
 /// A toolchain that answers from a function instead of a process.
@@ -104,6 +101,21 @@ fn runnerFor(compiler: Option[Str]) -> fn(Array[Str], Str, Str, Int, Int) -> Res
     }
   }
 }
+
+/// The first named library that holds `Std` and is not a built executable's bundle, else the one
+/// beside the compiler. `locate` names `PUDU_MCP_LIB`, then `PUDU_LIB`.
+export fn chooseLibrary(named: &Array[Option[Str]], compiler: Option[Str]) -> Option[Str] {
+  for given in *named {
+    if let Some(path) = given {
+      if hasStd(path) && !isBundle(path) { return Some(path) }
+    }
+  }
+  libraryFrom(compiler ?)
+}
+
+/// Whether a library path is the directory a built executable unpacked its own modules into, which
+/// holds only the modules that executable needs.
+export fn isBundle(path: Str) -> Bool { Path.nameOf(Path.normalize(path)).startsWith(Server.BUNDLE_PREFIX) }
 
 /// Whether a directory holds the standard library's `Std` modules.
 fn hasStd(directory: Str) -> Bool {

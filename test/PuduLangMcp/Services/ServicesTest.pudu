@@ -44,6 +44,8 @@ fn main() -> Int {
   let archive = Result.unwrapOr(Fs.temporaryDirectoryIn(temporary, "pudu-mcp-archive-"), "/nonexistent")
   place(archive + "/bin/pudu", "")
   place(archive + "/lib/pudu/Std/Io.pudu", "module Std.Io\n")
+  let bundle = Result.unwrapOr(Fs.temporaryDirectoryIn(temporary, "pudu-bundle-"), "/nonexistent")
+  place(bundle + "/Std/Io.pudu", "module Std.Io\n")
   let checkout = Result.unwrapOr(Fs.temporaryDirectoryIn(temporary, "pudu-mcp-checkout-"), "/nonexistent")
   place(checkout + "/dist/build/x/pudu", "")
   place(checkout + "/packages/pudu/v0.1/lib/Std/Io.pudu", "module Std.Io\n")
@@ -95,6 +97,14 @@ fn main() -> Int {
       Test.not("scripted finished output is not truncated", Toolchain.finished(0, "x").truncated),
       Test.equals("an archive's library is beside its bin directory", &Toolchain.libraryFrom(archive + "/bin/pudu"), &Some(archive + "/lib/pudu")),
       Test.equals("a checkout's newest series is chosen", &Toolchain.libraryFrom(checkout + "/dist/build/x/pudu"), &Some(checkout + "/packages/pudu/v0.2/lib")),
+      Test.equals("a named library is chosen first", &Toolchain.chooseLibrary(&[Some(archive + "/lib/pudu"), None], None), &Some(archive + "/lib/pudu")),
+      Test.equals("a bundle directory holding Std is passed over", &Toolchain.chooseLibrary(&[Some(bundle), Some(archive + "/lib/pudu")], None), &Some(archive + "/lib/pudu")),
+      Test.equals("a named directory without Std is passed over", &Toolchain.chooseLibrary(&[Some(lonely), None], Some(archive + "/bin/pudu")), &Some(archive + "/lib/pudu")),
+      Test.equals("with nothing named, the library beside the compiler is chosen", &Toolchain.chooseLibrary(&[None, None], Some(archive + "/bin/pudu")), &Some(archive + "/lib/pudu")),
+      Test.equals("with nothing named and no compiler, there is no library", &Toolchain.chooseLibrary(&[None, Some(bundle)], None), &None),
+      Test.that("a built executable's bundle directory is a bundle", Toolchain.isBundle("/var/folders/x/T/pudu-bundle-80cf63ece39b4789") && Toolchain.isBundle("/tmp/pudu-bundle-1/")),
+      Test.not("an installed library is not a bundle", Toolchain.isBundle(archive + "/lib/pudu")),
+      Test.not("a directory merely holding a bundle-like name above it is not a bundle", Toolchain.isBundle("/tmp/pudu-bundle-1/lib")),
       Test.equals("no library anywhere above is none", &Toolchain.libraryFrom(lonely + "/bin/pudu"), &None),
       Test.that("installed packages are importable modules", names.contains("Shapes") && names.contains("Shapes.Area")),
       Test.that("a package without src is read from its root", names.contains("Flat")),
@@ -107,6 +117,7 @@ fn main() -> Int {
       Test.equals("a path outside is shown whole", &Workspace.relative(&located, "/etc/hosts"), &"/etc/hosts")
     ])
   let _a = Fs.removeTree(archive)
+  let _bundle = Fs.removeTree(bundle)
   let _b = Fs.removeTree(checkout)
   let _c = Fs.removeTree(lonely)
   let _d = Fs.removeTree(workspace)

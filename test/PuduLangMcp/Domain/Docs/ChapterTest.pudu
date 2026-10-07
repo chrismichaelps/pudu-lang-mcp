@@ -42,10 +42,14 @@ fn main() -> Int {
       Test.present("a document is found by group and slug", &Chapter.find(&Docs.CHAPTERS, "docs", "errors")),
       Test.absent("the right slug in the wrong group is not found", &Chapter.find(&Docs.CHAPTERS, "pages", "errors")),
       Test.equals("the corpus holds every published group", &List.sorted(&groups), &["docs", "examples", "pages", "releases"]),
-      Test.equals("the language guide has its chapters", &Chapter.inGroup(&Docs.CHAPTERS, "docs").length(), &24),
+      Test.equals("the language guide has its chapters", &Chapter.inGroup(&Docs.CHAPTERS, "docs").length(), &26),
+      Test.that("the derives chapter teaches the derives clause", match Chapter.find(&Docs.CHAPTERS, "docs", "derives") { case Some(held) => held.markdown.contains("derives") && held.markdown.contains("Meta") case None => false }),
+      Test.that("the 0.1.3 release notes are bundled", Chapter.find(&Docs.CHAPTERS, "releases", "0.1.3") != None),
+      Test.equals("the corpus names the release it was generated from", &Docs.REVISION, &"v0.1.3"),
       Test.that("every document has a title", Docs.CHAPTERS.filter(|held: Chapter.Chapter| held.title.isEmpty()).isEmpty()),
       Test.that("the contents list every document", Chapter.tableOfContents(&Docs.CHAPTERS).contains("releases/0.1.1")),
-      Test.that("the corpus keeps literal braces", Option.unwrapOr(Chapter.find(&Docs.CHAPTERS, "docs", "text"), sample).markdown.contains("\{"))
+      Test.that("the corpus keeps literal braces", Option.unwrapOr(Chapter.find(&Docs.CHAPTERS, "docs", "text"), sample).markdown.contains("\{")),
+      Test.that("the collections chapter names the Option-answering get", Option.unwrapOr(Chapter.find(&Docs.CHAPTERS, "docs", "collections"), sample).markdown.contains("`List.get(&items, i)` from `Std.List` answers an `Option`"))
     ])
   let ran = Test.run(&checks)
   for failure in Test.failuresOf(&ran) {

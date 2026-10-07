@@ -1,0 +1,41 @@
+/** @Domain.Reference.Derives.Scanner — derive strategies read from source text */
+module PuduLangMcp.Domain.Reference.Derives
+
+import Std.List as List
+import Std.Option as Option
+import Std.Text as Text
+import PuduLangMcp.Domain.Reference.Entry as Entry
+
+/// What starts a published derive strategy.
+const EXPORTED_DERIVE: Str = "export derive "
+
+/// What opens a doc comment line.
+const DOC_LINE: Str = "///"
+
+/// What opens a strategy's body.
+const BODY_OPEN: Str = "\{"
+
+/// The kind a strategy is listed under.
+const KIND: Str = "derive"
+
+/// Every derive strategy the module publishes, as `derive Trait for T: Shape`, each with the doc
+/// comment written directly above it.
+export fn strategiesOf(moduleName: Str, text: Str) -> Array[Entry.Entry] {
+  var found: Array[Entry.Entry] = []
+  var doc: Array[Str] = []
+  for line in text.split("\n") {
+    let trimmed = line.trim()
+    if trimmed.startsWith(DOC_LINE) {
+      doc = doc.push(Text.stripPrefix(Text.stripPrefix(trimmed, DOC_LINE), " "))
+    } else {
+      if line.startsWith(EXPORTED_DERIVE) {
+        let head = Text.stripPrefix(line, "export ")
+        let header = Text.breakOn(head, BODY_OPEN)[0].trim()
+        let name = Option.unwrapOr(List.first(&Text.stripPrefix(header, KIND + " ").split(" ")), "")
+        found = found.push(Entry.Entry{moduleName: moduleName, kind: KIND, name: name, signature: header, doc: doc.join("\n")})
+      }
+      doc = []
+    }
+  }
+  found
+}

@@ -34,6 +34,11 @@ fn recording(calls: &Sync.Cell[Array[Call]], library: Str) -> Toolchain.Toolchai
       let _logged = Sync.set(&log, Result.unwrapOr(Sync.get(&log), []).push(Call{arguments: arguments, input: input, directory: directory}))
       let command = Option.unwrapOr(List.first(&arguments), "")
       if command == "check" { return Toolchain.finished(1, directory + "/Main.pudu:3:1 error[E3001]: expected Int") }
+      if command == "expand" {
+        if arguments.contains("src/Plain.pudu") { return Toolchain.finished(0, "") }
+        if arguments.contains("src/Broken.pudu") { return Toolchain.finished(1, "error[E2011]: unresolved type name Nope") }
+        return Toolchain.finished(0, "// derive Std.Order.Eq for Main.Point, generated in Std.Order\nimpl Eq for Main.Point \{\}")
+      }
       if command == "fmt" { return if input.isEmpty() && arguments.contains("bad.pudu") { Toolchain.finished(1, "error[E1001]") } else { Toolchain.finished(0, "module Main\n") } }
       if command == "run" { return Bounded.Finished{status: 0, output: "hello", errors: "", timedOut: arguments.contains("Slow.pudu"), truncated: false, millis: 5} }
       if command == "lsp" {
@@ -73,9 +78,14 @@ fn call(context: &Context.Context, name: Str, arguments: &Array[(Str, Json.Json)
   }
 }
 
-/// The last recorded call.
+/// The commands the reference index runs on its own thread, which can land between a tool's call
+/// and the check that reads it.
+const INDEX_COMMANDS: Set[Str] = setOf(["api", "doc"])
+
+/// The last recorded call a tool made, past the reference index's own.
 fn last(calls: &Sync.Cell[Array[Call]]) -> Call {
-  Option.unwrapOr(List.last(&Result.unwrapOr(Sync.get(calls), [])), Call{arguments: [], input: "", directory: ""})
+  let asked = Result.unwrapOr(Sync.get(calls), []).filter(|held: Call| !INDEX_COMMANDS.contains(Option.unwrapOr(List.first(&held.arguments), "")))
+  Option.unwrapOr(List.last(&asked), Call{arguments: [], input: "", directory: ""})
 }
 
 /// Runs the suite.
@@ -88,6 +98,8 @@ fn main() -> Int {
   let _libraryFile = Io.write(library + "/Std/Io.pudu", "module Std.Io\n\nexport fn read() -> Int \{ 1 \}\n")
   let _sourceMade = Io.makeDirectory(root + "/src")
   let _sourceFile = Io.write(root + "/src/Shapes.pudu", "module Shapes\n")
+  let _plainFile = Io.write(root + "/src/Plain.pudu", "module Plain\n")
+  let _brokenFile = Io.write(root + "/src/Broken.pudu", "module Broken\n")
   let _notes = Io.write(root + "/notes.txt", "plain")
   let _secret = Io.write(outside + "/Secret.pudu", "module Secret\n")
   let _linked = Fs.linkTo(outside + "/Secret.pudu", root + "/src/Escape.pudu")
@@ -107,6 +119,10 @@ fn main() -> Int {
   let absent = call(&context, "pudu_check", &[("path", Json.Text("src/Nope.pudu"))])
   let both = call(&context, "pudu_check", &[("path", Json.Text("src/Shapes.pudu")), ("source", Json.Text("module Main"))])
   let formatted = call(&context, "pudu_format", &[("source", Json.Text("module Main\n"))])
+  let expanded = call(&context, "pudu_expand", &[("source", Json.Text("module Main\n"))])
+  let expandCall = last(&calls)
+  let expandedPlain = call(&context, "pudu_expand", &[("path", Json.Text("src/Plain.pudu"))])
+  let expandedBroken = call(&context, "pudu_expand", &[("path", Json.Text("src/Broken.pudu"))])
   let ran = call(&context, "pudu_run", &[("source", Json.Text("module Main\n"))])
   let runCall = last(&calls)
   let slow = call(&context, "pudu_run", &[("source", Json.Text("module Slow\n")), ("timeoutMs", Json.Number(200))])
@@ -147,6 +163,10 @@ fn main() -> Int {
   let _cleanLibrary = Fs.removeTree(library)
   let checks = Test.suite("App.Tools", &[
       Test.that("check answers the compiler's diagnostics", checked[0].contains("error[E3001]")),
+      Test.equals("expand runs the compiler's expand on the code", &expandCall.arguments, &["expand", "Main.pudu"]),
+      Test.that("expand answers the derived implementations", expanded[0].contains("impl Eq for Main.Point") && !expanded[1]),
+      Test.equals("expand says when nothing is derived", &expandedPlain, &("The code derives no implementations.", false)),
+      Test.that("expand answers the diagnostics that stop it", expandedBroken[0].contains("error[E2011]") && !expandedBroken[0].contains("derives no")),
       Test.not("diagnostics are an answer, not a tool error", checked[1]),
       Test.not("the scratch directory is hidden from output", checked[0].contains(checkCall.directory)),
       Test.equals("inline source is checked as Main.pudu", &checkCall.arguments, &["check", "Main.pudu"]),

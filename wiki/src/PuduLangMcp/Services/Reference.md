@@ -35,7 +35,7 @@ export fn moduleEntries(toolchain: &Toolchain.Toolchain, file: &ModuleFile) -> R
 
 ### Linkage
 
-- **Requires:** [[src/PuduLangMcp/Services/Toolchain]], [[src/PuduLangMcp/Domain/Reference/Decode]], [[src/PuduLangMcp/Domain/Code/SourceFile]], [[src/PuduLangMcp/Constants/Server]], `Std.Concurrent`, `Std.Fs`, `Std.Io`, `Std.Path`.
+- **Requires:** [[src/PuduLangMcp/Services/Toolchain]], [[src/PuduLangMcp/Domain/Reference/Decode]], [[src/PuduLangMcp/Domain/Reference/Derives]], [[src/PuduLangMcp/Domain/Code/SourceFile]], [[src/PuduLangMcp/Constants/Server]], `Std.Concurrent`, `Std.Fs`, `Std.Io`, `Std.Path`.
 - **Consumed by:** [[src/PuduLangMcp/App/Tools/Reference]], [[src/PuduLangMcp/App/Resources]], [[src/PuduLangMcp/App/Completion]].
 
 ## Algorithm
@@ -46,7 +46,9 @@ export fn moduleEntries(toolchain: &Toolchain.Toolchain, file: &ModuleFile) -> R
   packages). Directories are walked at most `MAX_WALK_DEPTH` levels below each root.
 - `build`: split the files into chunks of `REFERENCE_CHUNK` and, with at most `REFERENCE_WORKERS` at
   once, run `pudu api --json` then `pudu doc --json` over each chunk (each within
-  `REFERENCE_TIMEOUT_MS` and `REFERENCE_OUTPUT_CAP_BYTES`). Decode each chunk ([[src/PuduLangMcp/Domain/Reference/Decode]]) and join the chunks,
+  `REFERENCE_TIMEOUT_MS` and `REFERENCE_OUTPUT_CAP_BYTES`). Read each chunk file's text once: decode the chunk with those texts
+  ([[src/PuduLangMcp/Domain/Reference/Decode]]), which fills in type and trait declarations, and add
+  each file's derive strategies ([[src/PuduLangMcp/Domain/Reference/Derives]]). Join the chunks,
   keeping a declaration once. Any chunk failing is a tool failure naming it.
 - `moduleEntries`: the same two runs over one file, keeping only that module's declarations.
 
@@ -58,6 +60,8 @@ export fn moduleEntries(toolchain: &Toolchain.Toolchain, file: &ModuleFile) -> R
 
 ## Edge Cases
 
+- A file that cannot be read keeps the compiler's entries for it, without declarations or
+  strategies.
 - No library and no packages: an empty file list and an empty index.
 
 ## Depth
@@ -71,4 +75,4 @@ DEPTH 0.6 (DEEP).
 
 ## Referenced by
 
-[[src/PuduLangMcp/Services/_MOC]]
+[[src/PuduLangMcp/Domain/Reference/Derives]] · [[src/PuduLangMcp/Services/_MOC]]

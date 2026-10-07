@@ -1,6 +1,7 @@
 /** @Test.Domain.Catalog.ToolsTest.Suite — catalogue invariants and handler coverage */
 module PuduLangMcp.Domain.Catalog.ToolsTest
 
+import Std.Char as Char
 import Std.Io as Io
 import Std.Json as Json
 import Std.List as List
@@ -8,6 +9,7 @@ import Std.Map as Map
 import Std.Test as Test
 import Std.Text as Text
 import PuduLangMcp.App.Tools.Registry as Registry
+import PuduLangMcp.Constants.Server as Server
 import PuduLangMcp.Domain.Catalog.ToolSpec as ToolSpec
 import PuduLangMcp.Domain.Catalog.Tools as Tools
 import PuduLangMcp.Utils.JsonAccess as Access
@@ -29,6 +31,7 @@ fn expected() -> Array[(Str, (Bool, Bool, Bool, Bool), Array[Str])] {
     ("pudu_check", lookup, []),
     ("pudu_format", lookup, []),
     ("pudu_lint", lookup, []),
+    ("pudu_expand", lookup, []),
     ("pudu_run", (true, false, false, false), ["source"]),
     ("pudu_test", (false, false, false, true), []),
     ("pudu_hover", lookup, position),
@@ -50,6 +53,16 @@ fn declared(spec: &ToolSpec.ToolSpec) -> (Str, (Bool, Bool, Bool, Bool), Array[S
   (spec.name, hints, spec.properties.filter(|held: ToolSpec.Property| held.required).map(|held: ToolSpec.Property| held.name))
 }
 
+/// Every `pudu_…` tool name a text mentions, in order.
+fn mentioned(text: Str) -> Array[Str] {
+  var found: Array[Str] = []
+  for word in text.split(" ") {
+    let name = Text.filterChars(word, |symbol: Char| Char.isAlphanumeric(symbol) || symbol == '_')
+    if name.startsWith("pudu_") { found = found.push(name) }
+  }
+  found
+}
+
 /// Runs the suite.
 fn main() -> Int {
   let all = Tools.all()
@@ -61,6 +74,8 @@ fn main() -> Int {
   let check = described.filter(|tool: Json.Json| Access.text(&tool, "name") == Some("pudu_check"))[0]
   let bare = described.filter(|tool: Json.Json| Access.text(&tool, "name") == Some("pudu_toolchain"))[0]
   let checks = Test.suite("Domain.Catalog.Tools", &[
+      Test.equals("every tool the instructions name exists", &mentioned(Server.INSTRUCTIONS).filter(|name: Str| Tools.find(name) == None), &[]),
+      Test.that("the instructions name the reference tools", mentioned(Server.INSTRUCTIONS).contains("pudu_reference_search") && mentioned(Server.INSTRUCTIONS).contains("pudu_module_reference")),
       Test.equals("names are unique", &List.distinct(&names).length(), &names.length()),
       Test.all("names are well formed", &names, |name: Str| wellFormed(name)),
       Test.all("names carry the pudu_ prefix", &names, |name: Str| name.startsWith("pudu_")),

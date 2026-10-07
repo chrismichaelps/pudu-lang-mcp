@@ -24,6 +24,10 @@ the release notes, and the playground examples ([[decisions/ADR-0002-compiled-do
 pudu run tools/SyncDocs.pudu <pudu-lang-checkout> [revision]
 ```
 
+A released corpus comes from a tag: `git archive v0.1.3 website packages/pudu/v0.1/release-notes
+CODE_OF_CONDUCT.md CONTRIBUTING.md SECURITY.md | tar -x -C <dir>`, then run the tool on `<dir>`
+with the revision `v0.1.3`.
+
 Writes `src/PuduLangMcp/Generated/Docs.pudu`. Exit status 0 on success, 1 with a message on stderr
 otherwise.
 
@@ -57,4 +61,4 @@ otherwise.
 
 ## Referenced by
 
-[[src/PuduLangMcp/Generated/Docs]]
+[[CHANGELOG]] · [[src/PuduLangMcp/Generated/Docs]]

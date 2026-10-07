@@ -47,6 +47,8 @@ export const DEFAULT_SEARCH_LIMIT: Int
 export const MAX_SEARCH_LIMIT: Int
 export const ENV_PUDU_BIN: Str
 export const ENV_PUDU_LIB: Str
+export const ENV_PUDU_MCP_LIB: Str     // "PUDU_MCP_LIB", read before PUDU_LIB
+export const BUNDLE_PREFIX: Str        // name of a built executable's unpacked module directory
 export const ENV_WORKSPACE: Str
 ```
 
@@ -65,7 +67,8 @@ Constants only.
 
 ## Edge Cases
 
-- `SERVER_VERSION` must equal the manifest version; the package test asserts it.
+- `SERVER_VERSION` must equal the manifest version; `test/Package/LayoutTest` asserts it.
+- `INSTRUCTIONS` names only tools the catalogue has; the catalogue suite asserts it.
 
 ## Depth
 
@@ -79,6 +82,11 @@ DEPTH 0.2 (SHALLOW).
   and 60 s ceiling for runs and tests. _Rationale:_ interpretation is slower than native code but
   an agent waiting longer than a minute is better told to run the command itself.
 
+- **Q:** Why test that the instructions name real tools?
+  **A:** They told every client to call `pudu_stdlib_search` and `pudu_stdlib_module`, which never
+  existed, while the version they reported trailed the package. Both are text no other check reads.
+  _Rejected:_ reviewing the text by eye.
+
 ## Referenced by
 
-[[src/PuduLangMcp/Constants/_MOC]]
+[[CHANGELOG]] · [[handoffs/2026-10-07-pudu-0-1-3]] · [[src/PuduLangMcp/Constants/_MOC]]

@@ -30,6 +30,7 @@ export fn handlers() -> Map[Str, fn(&Context.Context, &Arguments.Args) -> Result
       ("pudu_check", Compiler.check),
       ("pudu_format", Compiler.format),
       ("pudu_lint", Compiler.lint),
+      ("pudu_expand", Compiler.expand),
       ("pudu_run", Compiler.run),
       ("pudu_test", Compiler.test),
       ("pudu_hover", Language.hover),
