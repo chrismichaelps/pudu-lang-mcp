@@ -36,8 +36,8 @@ export fn run(program: Str, arguments: &Array[Str], input: Str, directory: Str, 
   let base = Process.launch(program, arguments)
   let launch = if directory.isEmpty() { base } else { base.inDirectory(directory) }
   let running = Process.begin(&launch) ?
-  let output = Sync.cell(Captured{kept: ByteSeq.empty(), ended: false})
-  let errors = Sync.cell(Captured{kept: ByteSeq.empty(), ended: false})
+  let output = Sync.cell(opened())
+  let errors = Sync.cell(opened())
   let outputReader = capture(&running, Process.read, &output, capBytes)
   let errorReader = capture(&running, Process.readErrors, &errors, capBytes)
   if !input.isEmpty() {
@@ -137,7 +137,10 @@ fn settled(reader: Result[Concurrent.Task, Concurrent.ConcurrentError], into: &S
   ended
 }
 
-/// What a reader has published; an unreadable cell reads as a stream still open, so waits stay bounded.
+/// What a reader has published; an unreadable cell reads as a stream just opened, so waits stay bounded.
 fn current(into: &Sync.Cell[Captured]) -> Captured {
-  Result.unwrapOr(Sync.get(into), Captured{kept: ByteSeq.empty(), ended: false})
+  Result.unwrapOr(Sync.get(into), opened())
 }
+
+/// A stream that is open and has published nothing.
+fn opened() -> Captured { Captured{kept: ByteSeq.empty(), ended: false} }

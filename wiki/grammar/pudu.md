@@ -1,14 +1,14 @@
 ---
 type: grammar
 language: Pudu
-version: "0.1.1"
+version: "0.1.3"
 tags: [grammar]
 aliases: [Grammar — Pudu, Pudu Grammar]
 ---
 
 # Grammar — Pudu
 
-The Pudu surface this repository is written against, pinned to compiler `0.1.1`. Where this
+The Pudu surface this repository is written against, pinned to compiler `0.1.3`. Where this
 page and the compiler disagree, the compiler wins and this page is corrected in the same change.
 
 ## SDK Discovery Map
@@ -23,6 +23,7 @@ page and the compiler disagree, the compiler wins and this page is corrected in 
 | Confinement | `Std.Fs` | `canonical`, `resolveInside`, `temporaryDirectoryIn`, `removeTree` |
 | Threads | `Std.Concurrent`, `Std.Sync` | `Concurrent.start`, `join`; `Sync.cell`, `get`, `set` |
 | Collections | `Std.List`, `Std.Map`, `Std.Set` | `List.get`, `List.first`, `List.find`, `List.sortBy`, `List.take`; `Map.get`, `Map.getOr` |
+| Derives | `Std.Json`, `Std.Meta` | `derives Json.Encode`, `derives Json.Decode`, `@json("name")`; `Meta.build`, `Meta.collect`, `field.has`, `field.attributeOr` |
 | Tests | `Std.Test` | `suite`, `equals`, `that`, `present`, `absent`, `run`, `report` |
 
 ## Imports / Namespaces
@@ -46,6 +47,10 @@ page and the compiler disagree, the compiler wins and this page is corrected in 
   never `if` ladders or `match` chains over strings.
 - `comptime fn` computes constants; it may not perform effects.
 - Closures: `fn(x: Int) -> Int { x + 1 }`, or the short form `|x: Int| x + 1`.
+- A type opts into generated implementations with a trailing `derives` clause:
+  `type DocItem = { @json("module") moduleName: Str, … } derives Json.Decode`. A field cannot be
+  named `module`, so it takes another name and `@json("module")` keeps its wire key.
+- A static trait method is called on a type parameter: `T.decode(&value)` with `T: Json.Decode`.
 - Borrowing: `&T` parameters are read-only views; a function that must own a value takes `T`.
   `*view` copies a borrowed value into an owned one.
 
@@ -75,7 +80,13 @@ page and the compiler disagree, the compiler wins and this page is corrected in 
 - Rationale belongs in the mirrored page's Grill Log. No narration, history, or explanation of the
   obvious in code.
 
-## Prohibited Patterns (verified against the 0.1.1 compiler)
+## Prohibited Patterns (verified against the 0.1.3 compiler)
+
+- **Trusting `pudu doc --json` for derives.** It omits `export derive` declarations
+  ([chrismichaelps/pudu-lang#458](https://github.com/chrismichaelps/pudu-lang/issues/458)) and
+  reports types and traits without signatures; [[src/PuduLangMcp/Domain/Reference/Derives]] and
+  [[src/PuduLangMcp/Domain/Reference/Decode]] fill both in from source.
+- **`impl` names a binding.** It is a keyword.
 
 - **A brace inside a string literal is interpolation.** `"{name}"` interpolates. A literal brace
   is `\{` or `\}`; JSON written in a literal needs both escaped.

@@ -7,6 +7,7 @@ tags: [moc]
 
 - [[src/PuduLangMcp/Domain/Reference/Entry]] — public declarations, module listing, and name search.
 - [[src/PuduLangMcp/Domain/Reference/Decode]] — compiler reference output as entries.
+- [[src/PuduLangMcp/Domain/Reference/Derives]] — derive strategies read from source text.
 
 ## Referenced by
 

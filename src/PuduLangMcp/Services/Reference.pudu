@@ -12,6 +12,7 @@ import Std.Result as Result
 import PuduLangMcp.Constants.Server as Server
 import PuduLangMcp.Domain.Code.SourceFile as SourceFile
 import PuduLangMcp.Domain.Reference.Decode as Decode
+import PuduLangMcp.Domain.Reference.Derives as Derives
 import PuduLangMcp.Domain.Reference.Entry as Entry
 import PuduLangMcp.Errors.ToolError as ToolError
 import PuduLangMcp.Services.Toolchain as Toolchain
@@ -61,9 +62,9 @@ export fn fileOf(files: &Array[ModuleFile], moduleName: Str) -> Option[ModuleFil
 /// The public declarations of every file, from the compiler's reference output.
 export fn build(toolchain: &Toolchain.Toolchain, files: &Array[ModuleFile]) -> Result[Array[Entry.Entry], ToolError.ToolFailure] {
   if toolchain.compiler == None { return Err(ToolError.ToolchainMissing) }
-  let chunks = chunked(&files.map(|file: ModuleFile| file.path), Server.REFERENCE_CHUNK)
+  let chunks = chunked(files, Server.REFERENCE_CHUNK)
   let runner = *toolchain
-  let decoded = match Concurrent.mapBounded(&chunks, Server.REFERENCE_WORKERS, fn(chunk: Array[Str]) -> Result[Array[Entry.Entry], Str] {
+  let decoded = match Concurrent.mapBounded(&chunks, Server.REFERENCE_WORKERS, fn(chunk: Array[ModuleFile]) -> Result[Array[Entry.Entry], Str] {
       indexChunk(&runner, &chunk)
     }) {
     case Ok(results) => results
@@ -91,20 +92,31 @@ export fn build(toolchain: &Toolchain.Toolchain, files: &Array[ModuleFile]) -> R
 /// The public declarations of one module's file.
 export fn moduleEntries(toolchain: &Toolchain.Toolchain, file: &ModuleFile) -> Result[Array[Entry.Entry], ToolError.ToolFailure] {
   if toolchain.compiler == None { return Err(ToolError.ToolchainMissing) }
-  match indexChunk(toolchain, &[file.path]) {
+  match indexChunk(toolchain, &[*file]) {
     case Ok(found) => Ok(found.filter(|entry: Entry.Entry| entry.moduleName == file.moduleName))
     case Err(problem) => Err(ToolError.Unavailable("The reference for " + file.moduleName + " could not be read: " + problem))
   }
 }
 
-/// The public declarations of one chunk of files.
-fn indexChunk(toolchain: &Toolchain.Toolchain, chunk: &Array[Str]) -> Result[Array[Entry.Entry], Str] {
-  let api = toolchain.run(["api", "--json"].concat(*chunk), "", "", Server.REFERENCE_TIMEOUT_MS, Server.REFERENCE_OUTPUT_CAP_BYTES) ?
+/// The public declarations of one chunk of files: the compiler's reference, with each declaration
+/// it reports without a signature read from its file, and each derive strategy the compiler does
+/// not report.
+fn indexChunk(toolchain: &Toolchain.Toolchain, chunk: &Array[ModuleFile]) -> Result[Array[Entry.Entry], Str] {
+  let paths = chunk.map(|file: ModuleFile| file.path)
+  let api = toolchain.run(["api", "--json"].concat(paths), "", "", Server.REFERENCE_TIMEOUT_MS, Server.REFERENCE_OUTPUT_CAP_BYTES) ?
   if api.timedOut { return Err("pudu api timed out") }
   let exports = Decode.exportsOf(api.output) ?
-  let doc = toolchain.run(["doc", "--json"].concat(*chunk), "", "", Server.REFERENCE_TIMEOUT_MS, Server.REFERENCE_OUTPUT_CAP_BYTES) ?
+  let doc = toolchain.run(["doc", "--json"].concat(paths), "", "", Server.REFERENCE_TIMEOUT_MS, Server.REFERENCE_OUTPUT_CAP_BYTES) ?
   if doc.timedOut { return Err("pudu doc timed out") }
-  Decode.entriesOf(doc.output, &exports)
+  var sources: Map[Str, Str] = mapOf([])
+  var strategies: Array[Entry.Entry] = []
+  for file in *chunk {
+    if let Ok(text) = Io.read(file.path) {
+      sources = sources.insert(file.moduleName, text)
+      strategies = strategies.concat(Derives.strategiesOf(file.moduleName, text))
+    }
+  }
+  Ok(Decode.entriesOf(doc.output, &exports, &sources) ?.concat(strategies))
 }
 
 /// Every `.pudu` file under a directory, without following links to directories.
@@ -143,8 +155,8 @@ fn isDirectory(path: Str) -> Bool {
 }
 
 /// Items in consecutive groups of at most `size`.
-fn chunked(items: &Array[Str], size: Int) -> Array[Array[Str]] {
-  var groups: Array[Array[Str]] = []
+fn chunked[T](items: &Array[T], size: Int) -> Array[Array[T]] {
+  var groups: Array[Array[T]] = []
   var start = 0
   while start < items.length() {
     let end = Math.min(start + size, items.length())

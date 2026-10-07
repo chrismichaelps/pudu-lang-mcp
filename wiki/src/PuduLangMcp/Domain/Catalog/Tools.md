@@ -36,6 +36,7 @@ export fn find(name: Str) -> Option[ToolSpec.ToolSpec]
 | `pudu_check` | `source` or `path` | read-only, idempotent, closed |
 | `pudu_format` | `source` or `path` | read-only, idempotent, closed |
 | `pudu_lint` | `source` or `path` | read-only, idempotent, closed |
+| `pudu_expand` | `source` or `path` | read-only, idempotent, closed |
 | `pudu_run` | `source`, `timeoutMs?` | read-only, not idempotent, closed |
 | `pudu_test` | `path?`, `timeoutMs?` | not read-only, not destructive, not idempotent, open |
 | `pudu_hover` | `source` or `path`, `line`, `character` | read-only, idempotent, closed |

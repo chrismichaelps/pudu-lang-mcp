@@ -8,13 +8,13 @@ import PuduLangMcp.Errors.RpcError as RpcError
 import PuduLangMcp.Utils.JsonAccess as Access
 
 /** @Domain.Catalog.Prompts.PromptArgument — one named prompt input */
-export type PromptArgument = { name: Str, description: Str, required: Bool }
+export type PromptArgument = { name: Str, description: Str, required: Bool } derives Json.Encode
 
 /** @Domain.Catalog.Prompts.PromptSpec — one prompt described once */
-export type PromptSpec = { name: Str, title: Str, description: Str, arguments: Array[PromptArgument] }
+export type PromptSpec = { name: Str, title: Str, description: Str, arguments: Array[PromptArgument] } derives Json.Encode
 
 /// Language rules and the verification workflow, appended to every prompt.
-export const CONVENTIONS: Str = "Pudu rules that are easy to get wrong:\n- A brace inside a string literal starts interpolation: \"\{name\}\" inserts name. Write \\\{ and \\\} for literal braces.\n- Option and Result helpers are module functions: Option.unwrapOr(value, fallback), never value.unwrapOr(fallback).\n- items.get(i) answers the element and stops the program when i is out of range; List.get(&items, i) answers an Option.\n- Module scope holds only const. Lookup tables are const tables built with mapOf([...]) or setOf([...]).\n- scope, module, and where are keywords and cannot name bindings or fields.\n- Every import is qualified and aliased: import Std.Json as Json.\n\nBefore answering with Pudu code, check it with pudu_check, format it with pudu_format, and lint it with pudu_lint. Look up library functions with pudu_reference_search and pudu_module_reference rather than guessing their names."
+export const CONVENTIONS: Str = "Pudu rules that are easy to get wrong:\n- A brace inside a string literal starts interpolation: \"\{name\}\" inserts name. Write \\\{ and \\\} for literal braces.\n- Option and Result helpers are module functions: Option.unwrapOr(value, fallback), never value.unwrapOr(fallback).\n- items.get(i) answers the element and stops the program when i is out of range; List.get(&items, i) answers an Option.\n- Module scope holds only const. Lookup tables are const tables built with mapOf([...]) or setOf([...]).\n- scope, module, and where are keywords and cannot name bindings or fields.\n- Every import is qualified and aliased: import Std.Json as Json.\n- A type opts into generated implementations with a trailing derives clause: type Point = \{ x: Int, y: Int \} derives Order.Eq, Json.Encode. Show, Order.Eq, Order.Ord, Order.Hash, Json.Encode, Json.Decode, and Db.Row can be derived; prefer a derive to a hand-written impl.\n- Field attributes steer a derive: @json(\"wireName\") renames a field, @skip leaves it out, @default(json) fills a missing one. A field named like a keyword, such as module, is renamed and given @json(\"module\").\n- A strategy is written export derive Trait for T: Record \{ ... \} (or T: Sum) with Std.Meta: Meta.build constructs the record, Meta.collect gathers one answer per field, and field.has(name) and field.attributeOr(name, fallback) read attributes.\n- Inside Meta.collect, a static call such as F.method() whose implementation calls A.method() through a type parameter fails when run; use Meta.build or an instance method there.\n\nBefore answering with Pudu code, check it with pudu_check, format it with pudu_format, and lint it with pudu_lint. Look up library functions with pudu_reference_search and pudu_module_reference rather than guessing their names."
 
 /// Every prompt, in listing order.
 export fn all() -> Array[PromptSpec] {
@@ -36,18 +36,7 @@ export fn all() -> Array[PromptSpec] {
 }
 
 /// A prompt as `prompts/list` describes it.
-export fn toJson(spec: &PromptSpec) -> Json.Json {
-  Json.object(&[
-      ("name", Json.Text(spec.name)),
-      ("title", Json.Text(spec.title)),
-      ("description", Json.Text(spec.description)),
-      ("arguments", Json.list(&spec.arguments.map(|held: PromptArgument| Json.object(&[
-                ("name", Json.Text(held.name)),
-                ("description", Json.Text(held.description)),
-                ("required", Json.Boolean(held.required))
-              ]))))
-    ])
-}
+export fn toJson(spec: &PromptSpec) -> Json.Json { spec.encode() }
 
 /// A prompt's description and user message, or why its arguments are refused.
 export fn render(name: Str, arguments: &Json.Json) -> Result[(Str, Str), RpcError.ProtocolError] {

@@ -16,7 +16,7 @@ aliases: [Compiler Tools]
 
 ## Purpose
 
-`pudu_check`, `pudu_format`, `pudu_lint`, `pudu_run`, and `pudu_test`: the compiler's own answers
+`pudu_check`, `pudu_format`, `pudu_lint`, `pudu_expand`, `pudu_run`, and `pudu_test`: the compiler's own answers
 for a piece of code or a workspace file.
 
 ## Interface
@@ -27,6 +27,7 @@ for a piece of code or a workspace file.
 export fn check(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure]
 export fn format(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure]
 export fn lint(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure]
+export fn expand(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure]
 export fn run(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure]
 export fn test(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure]
 ```
@@ -48,6 +49,7 @@ standard error, trimmed, with the scratch directory's path removed, bounded to `
 | `pudu_check` | `check <file>` | the compiler's report, "no diagnostics" included |
 | `pudu_format` | `fmt --stdout <file>` | the formatted code; on failure "The code could not be formatted:" and the diagnostics |
 | `pudu_lint` | `lint <file>` | the findings, or the linter's clean report |
+| `pudu_expand` | `expand <file>` | the implementations the file's derives generate, "The code derives no implementations." when there are none, or the diagnostics that stop them |
 | `pudu_run` | `run --confined <file>` | `exit status N`, then output; a stopped run says it was stopped after the deadline |
 | `pudu_test` | `test [path]` in the workspace root | the test report |
 
@@ -72,6 +74,12 @@ DEPTH 0.5.
 - **Q:** Run `pudu_test` confined? **A:** No; the project's suites are its own code, written to
   touch files and processes. The tool's annotations say so instead.
 
+- **Q:** Why expose `pudu expand`?
+  **A:** A derive writes code nobody sees; reading what `derives Json.Encode` or a library's own
+  strategy produced for a type is how a reader learns why it behaves as it does, and how a strategy
+  author checks one. _Rejected:_ describing derived code from the strategy's source (it depends on
+  the type).
+
 ## Referenced by
 
-[[src/PuduLangMcp/App/Tools/_MOC]]
+[[CHANGELOG]] · [[handoffs/2026-10-07-pudu-0-1-3]] · [[src/PuduLangMcp/App/Tools/_MOC]]

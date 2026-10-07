@@ -37,6 +37,8 @@ export fn locate() -> Toolchain
 export fn scripted(version: Str, library: Option[Str], answer: fn(Array[Str], Str, Str) -> Bounded.Finished) -> Toolchain   // arguments, input, directory
 export fn finished(status: Int, output: Str) -> Bounded.Finished
 export fn libraryFrom(compiler: Str) -> Option[Str]
+export fn chooseLibrary(named: &Array[Option[Str]], compiler: Option[Str]) -> Option[Str]
+export fn isBundle(path: Str) -> Bool
 ```
 
 ### Linkage
@@ -51,7 +53,9 @@ export fn libraryFrom(compiler: Str) -> Option[Str]
    along the search path. Canonicalized, so a symbolic link leads to the real installation.
 2. Version: `pudu version` within the command deadline, with the leading `pudu ` removed; empty
    when it does not answer.
-3. Library: `PUDU_LIB` when it holds `Std/`; otherwise `libraryFrom(compiler)`.
+3. Library: `chooseLibrary` over `PUDU_MCP_LIB` then `PUDU_LIB` — the first that holds `Std/` and
+   is not a bundle directory (`isBundle`: its name starts with `pudu-bundle-`); otherwise
+   `libraryFrom(compiler)`.
 4. `run` calls [[src/PuduLangMcp/Services/Process/Bounded]] with the compiler and the caller's output cap; with no
    compiler it answers `Err("pudu was not found")`.
 
@@ -81,6 +85,14 @@ DEPTH 0.65 (DEEP). A four-field record hides discovery, versioning, and process 
   `packages/pudu/<series>/lib`, found by walking up from the executable, the same place the
   compiler itself looks.
 
+- **Q:** Why pass over a `PUDU_LIB` that names a bundle, and read `PUDU_MCP_LIB` first?
+  **A:** An executable made by `pudu build` sets `PUDU_LIB` to the directory it unpacks its own
+  modules into, overwriting the user's value
+  ([chrismichaelps/pudu-lang#460](https://github.com/chrismichaelps/pudu-lang/issues/460)). The
+  built server therefore indexed its 19 bundled modules instead of the 214 installed ones, and the
+  documented `PUDU_LIB` setting had no effect. `PUDU_MCP_LIB` is a name the runtime leaves alone.
+  _Rejected:_ ignoring `PUDU_LIB` entirely (it is still right under `pudu run`).
+
 ## Referenced by
 
-[[src/PuduLangMcp/Services/_MOC]] · [[seams/Toolchain]] · [[domain/Toolchain]]
+[[CHANGELOG]] · [[domain/Toolchain]] · [[handoffs/2026-10-07-pudu-0-1-3]] · [[seams/Toolchain]] · [[src/PuduLangMcp/Services/_MOC]]

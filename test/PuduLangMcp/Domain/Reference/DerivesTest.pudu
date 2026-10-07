@@ -1,0 +1,29 @@
+/** @Test.Domain.Reference.DerivesTest.Suite — derive strategies read from source */
+module PuduLangMcp.Domain.Reference.DerivesTest
+
+import Std.Io as Io
+import Std.Test as Test
+import PuduLangMcp.Domain.Reference.Derives as Derives
+import PuduLangMcp.Domain.Reference.Entry as Entry
+
+/// A module publishing two strategies, one private one, and a commented-out one.
+const SOURCE: Str = "module Std.Show\n\n/// A type that renders itself.\nexport trait Show \{\n  fn show(self: &Self) -> Str\n\}\n\n/// A record rendered as its name\n/// and its fields.\nexport derive Show for T: Record \{\n  fn show(self: &T) -> Str \{ \"\" \}\n\}\n\nexport derive Show for T: Sum \{\n  fn show(self: &T) -> Str \{ \"\" \}\n\}\n\n/// Not published.\nderive Hidden for T: Record \{\n\}\n\n// export derive Gone for T: Record \{\n/// Kept apart.\n\nexport derive Ord for T: Record\n"
+
+/// Runs the suite.
+fn main() -> Int {
+  let found = Derives.strategiesOf("Std.Show", SOURCE)
+  let checks = Test.suite("Domain.Reference.Derives", &[
+      Test.equals("every published strategy is found, in order", &found.map(|held: Entry.Entry| held.signature), &["derive Show for T: Record", "derive Show for T: Sum", "derive Ord for T: Record"]),
+      Test.equals("a strategy is listed by its trait and module", &found.map(|held: Entry.Entry| held.moduleName + " " + held.kind + " " + held.name), &["Std.Show derive Show", "Std.Show derive Show", "Std.Show derive Ord"]),
+      Test.equals("the doc comment directly above is kept", &found.map(|held: Entry.Entry| held.doc), &["A record rendered as its name\nand its fields.", "", ""]),
+      Test.equals("a doc comment separated by other lines is not taken", &Derives.strategiesOf("M", "/// Stale.\nexport fn f() -> Int \{ 1 \}\nexport derive Eq for T: Record \{\n\}").map(|held: Entry.Entry| held.doc), &[""]),
+      Test.equals("a doc comment line without a space keeps its text", &Derives.strategiesOf("M", "///Tight.\nexport derive Eq for T: Record \{\n\}").map(|held: Entry.Entry| held.doc), &["Tight."]),
+      Test.equals("an indented derive line is not a published strategy", &Derives.strategiesOf("M", "  export derive Eq for T: Record \{").length(), &0),
+      Test.equals("a module without strategies has none", &Derives.strategiesOf("M", "module M\n").length(), &0)
+    ])
+  let ran = Test.run(&checks)
+  for failure in Test.failuresOf(&ran) {
+    let _reported = Io.writeErrorLine(failure)
+  }
+  Test.report(&ran)
+}

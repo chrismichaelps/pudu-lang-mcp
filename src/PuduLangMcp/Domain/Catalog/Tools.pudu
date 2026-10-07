@@ -28,16 +28,17 @@ export fn all() -> Array[ToolSpec.ToolSpec] {
         ToolSpec.text("group", "docs (default), pages, releases, or examples.", false),
         ToolSpec.text("section", "A section heading or its anchor, such as 'working-with-results'.", false)
       ], [], LOOKUP),
-    spec("pudu_reference_search", "Search the Pudu API", "Search the installed standard library and the workspace's installed packages by name, description, or type shape such as 'Array[a] -> Option[a]'.", [
+    spec("pudu_reference_search", "Search the Pudu API", "Search the installed standard library and the workspace's installed packages by name, description, or type shape such as 'Array[a] -> Option[a]'. Derive strategies are included: search 'derive' for every trait a type can derive.", [
         ToolSpec.text("query", "A name, words from a description, or a type shape containing '->'.", true),
         ToolSpec.integer("limit", "Most declarations to answer.", false, 1, Server.MAX_SEARCH_LIMIT)
       ], [], LOOKUP),
-    spec("pudu_module_reference", "Read a module's API", "Every public declaration of one module with its signature and documentation, such as Std.Json, from the installed toolchain or an installed package.", [
+    spec("pudu_module_reference", "Read a module's API", "Every public declaration of one module, such as Std.Json, from the installed toolchain or an installed package: functions with their signatures, types with their declarations and derives clauses, traits with their methods, and derive strategies, each with its documentation.", [
         ToolSpec.text("module", "The module name, such as 'Std.Json' or 'Std.Http.Server'.", true)
       ], [], LOOKUP),
     spec("pudu_check", "Check Pudu code", "Compile Pudu code and report its diagnostics without running it. Pass the code as 'source', or a file in the workspace as 'path'.", sourceOrPath(), SOURCE_OR_PATH, LOOKUP),
     spec("pudu_format", "Format Pudu code", "Answer the code as the Pudu formatter lays it out. Never writes files.", sourceOrPath(), SOURCE_OR_PATH, LOOKUP),
     spec("pudu_lint", "Lint Pudu code", "Report lint findings for Pudu code, each with its rule code and a suggested fix where one is safe.", sourceOrPath(), SOURCE_OR_PATH, LOOKUP),
+    spec("pudu_expand", "Expand Pudu derives", "Answer the implementations a file's derives clauses generate, written out as Pudu, so a derived Eq, Json.Encode, or a strategy of your own can be read and checked. Pass the code as 'source', or a file in the workspace as 'path'.", sourceOrPath(), SOURCE_OR_PATH, LOOKUP),
     spec("pudu_run", "Run a Pudu program", "Run a program's main function confined: it may print, read the clock, and use threads, but not files, processes, the network, or foreign code. Answers its output and exit status.", [
         ToolSpec.text("source", "A complete program with a main function.", true),
         ToolSpec.integer("timeoutMs", "Stop the program after this many milliseconds.", false, 100, Server.MAX_RUN_TIMEOUT_MS)

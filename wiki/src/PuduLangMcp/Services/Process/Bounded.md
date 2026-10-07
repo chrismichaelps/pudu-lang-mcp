@@ -98,11 +98,13 @@ DEPTH 0.7 (DEEP). A small signature over threads, pipes, deadlines, and UTF-8 bo
   child sits in the pipe and is read well inside the grace. _Rejected:_ joining unconditionally,
   which waits for every process holding the pipe (5 s for `sh -c "sleep 5; true"` stopped at
   200 ms); waiting until the original deadline, which holds a finished call for its whole budget.
-- **Q:** What does a reader cell that cannot be read answer? **A:** A stream still open, so the
-  wait ends at the grace rather than joining a reader that may never finish. `Sync.get` fails only
-  on a cell that is gone, which no test can arrange; the mutant flipping that fallback survives for
-  that reason alone. _Rejected:_ an ended stream, which would join without a bound.
+- **Q:** What does a reader cell that cannot be read answer? **A:** A stream just opened — the
+  same value every reader cell starts with, built by one function — so the wait ends at the grace
+  rather than joining a reader that may never finish. `Sync.get` fails only on a cell that is gone,
+  which no test can arrange; sharing the starting value makes the fallback the tested path.
+  _Rejected:_ an ended stream, which would join without a bound; a separate fallback literal, whose
+  mutant no test could kill.
 
 ## Referenced by
 
-[[src/PuduLangMcp/Services/Process/_MOC]] · [[seams/Toolchain]]
+[[CHANGELOG]] · [[seams/Toolchain]] · [[src/PuduLangMcp/Services/Process/_MOC]]

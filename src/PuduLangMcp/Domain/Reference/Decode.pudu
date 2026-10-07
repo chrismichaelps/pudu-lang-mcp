@@ -2,53 +2,121 @@
 module PuduLangMcp.Domain.Reference.Decode
 
 import Std.Json as Json
-import Std.Option as Option
+import Std.List as List
+import Std.Text as Text
 import PuduLangMcp.Domain.Reference.Entry as Entry
-import PuduLangMcp.Utils.JsonAccess as Access
+
+/** @Domain.Reference.Decode.ApiExport — one public name `pudu api` reports */
+type ApiExport = { @json("module") moduleName: Str, name: Str } derives Json.Decode
+
+/** @Domain.Reference.Decode.ApiOutput — the whole `pudu api --json` answer */
+type ApiOutput = { exports: Array[ApiExport] } derives Json.Decode
+
+/** @Domain.Reference.Decode.DocItem — one declaration `pudu doc` reports */
+type DocItem = {
+  @json("module") moduleName: Str,
+  name: Str,
+  kind: Str,
+  signature: Option[Str],
+  doc: Array[Str],
+  span: Option[Array[Int]]
+} derives Json.Decode
+
+/** @Domain.Reference.Decode.DocOutput — the whole `pudu doc --json` answer */
+type DocOutput = { entries: Array[DocItem] } derives Json.Decode
+
+/// What opens the owner of a method's kind, as in `fn (trait Show)` or `fn (Int)`.
+const OWNER_OPEN: Str = " ("
+
+/// What marks a method's owner as a trait.
+const TRAIT_OWNER: Str = "trait "
+
+/// What opens a doc comment line inside a declaration.
+const DOC_LINE: Str = "///"
 
 /// The qualified names `pudu api --json` reports as public.
 export fn exportsOf(apiJson: Str) -> Result[Set[Str], Str] {
-  let value = match Json.decode(apiJson) {
-    case Ok(decoded) => decoded
-    case Err(problem) => { return Err("api output is not JSON: " + Json.explain(&problem)) }
-  }
-  let items = match Access.member(&value, "exports") {
-    case Some(Json.List(found)) => found
-    case _ => { return Err("api output has no exports") }
-  }
+  let output: ApiOutput = decoded(apiJson, "api") ?
   var names: Set[Str] = setOf([])
-  for item in items {
-    names = names.insert(Option.unwrapOr(Access.text(&item, "module"), "") + "." + Option.unwrapOr(Access.text(&item, "name"), ""))
+  for item in output.exports {
+    names = names.insert(item.moduleName + "." + item.name)
   }
   Ok(names)
 }
 
-/// The exported declarations in `pudu doc --json` output, each once.
-export fn entriesOf(docJson: Str, exports: &Set[Str]) -> Result[Array[Entry.Entry], Str] {
-  let value = match Json.decode(docJson) {
-    case Ok(decoded) => decoded
-    case Err(problem) => { return Err("doc output is not JSON: " + Json.explain(&problem)) }
-  }
-  let items = match Access.member(&value, "entries") {
-    case Some(Json.List(found)) => found
-    case _ => { return Err("doc output has no entries") }
-  }
+/// The public declarations in `pudu doc --json` output, each once: exported names, the methods of
+/// exported traits and types, and the implementations of an exported trait's methods. A type or
+/// trait without a signature takes its declaration from `sources`, the text of each module.
+export fn entriesOf(docJson: Str, exports: &Set[Str], sources: &Map[Str, Str]) -> Result[Array[Entry.Entry], Str] {
+  let output: DocOutput = decoded(docJson, "doc") ?
+  let traitMethods = traitMethodsOf(&output.entries, exports)
   var seen: Set[Str] = setOf([])
   var entries: Array[Entry.Entry] = []
-  for item in items {
-    let moduleName = Option.unwrapOr(Access.text(&item, "module"), "")
-    let name = Option.unwrapOr(Access.text(&item, "name"), "")
-    let kind = Option.unwrapOr(Access.text(&item, "kind"), "")
-    let signature = Option.unwrapOr(Access.text(&item, "signature"), "")
-    let key = moduleName + "." + name + " " + kind + " " + signature
-    if exports.contains(moduleName + "." + name) && !seen.contains(key) {
+  for item in output.entries {
+    let signature = signatureOf(&item, sources)
+    let key = item.moduleName + "." + item.name + " " + item.kind + " " + signature
+    if isPublic(&item, exports, &traitMethods) && !seen.contains(key) {
       seen = seen.insert(key)
-      let doc = match Access.member(&item, "doc") {
-        case Some(Json.List(lines)) => lines.map(|line: Json.Json| Option.unwrapOr(Json.asText(&line), "")).join("\n")
-        case _ => ""
-      }
-      entries = entries.push(Entry.Entry{moduleName: moduleName, kind: kind, name: name, signature: signature, doc: doc})
+      entries = entries.push(Entry.Entry{moduleName: item.moduleName, kind: item.kind, name: item.name, signature: signature, doc: item.doc.join("\n")})
     }
   }
   Ok(entries)
+}
+
+/// The value the output decodes to, or why it does not.
+fn decoded[T: Json.Decode](output: Str, command: Str) -> Result[T, Str] {
+  let value = match Json.decode(output) {
+    case Ok(held) => held
+    case Err(problem) => { return Err(command + " output is not JSON: " + Json.explain(&problem)) }
+  }
+  match T.decode(&value) {
+    case Ok(held) => Ok(held)
+    case Err(problem) => Err(command + " output is not reference JSON: " + Json.explainDecode(&problem))
+  }
+}
+
+/// Whether a declaration belongs in the reference.
+fn isPublic(item: &DocItem, exports: &Set[Str], traitMethods: &Set[Str]) -> Bool {
+  if exports.contains(item.moduleName + "." + item.name) && ownerOf(item.kind) == None { return true }
+  match ownerOf(item.kind) {
+    case Some(owner) => exports.contains(item.moduleName + "." + Text.stripPrefix(owner, TRAIT_OWNER)) || traitMethods.contains(item.moduleName + "." + item.name)
+    case None => false
+  }
+}
+
+/// Every `Module.method` an exported trait of its module declares.
+fn traitMethodsOf(items: &Array[DocItem], exports: &Set[Str]) -> Set[Str] {
+  var found: Set[Str] = setOf([])
+  for item in *items {
+    if let Some(owner) = ownerOf(item.kind) {
+      if owner.startsWith(TRAIT_OWNER) && exports.contains(item.moduleName + "." + Text.stripPrefix(owner, TRAIT_OWNER)) {
+        found = found.insert(item.moduleName + "." + item.name)
+      }
+    }
+  }
+  found
+}
+
+/// The owner inside a method's kind: `trait Show` in `fn (trait Show)`, `Int` in `fn (Int)`.
+fn ownerOf(kind: Str) -> Option[Str] {
+  let open = Text.find(kind, OWNER_OPEN) ?
+  if !kind.endsWith(")") { return None }
+  Some(kind.slice(open + OWNER_OPEN.length(), kind.length() - 1))
+}
+
+/// The declared signature, or the declaration's source text without its doc comment lines when
+/// the compiler reports none.
+fn signatureOf(item: &DocItem, sources: &Map[Str, Str]) -> Str {
+  if let Some(written) = item.signature { return written }
+  let span = match item.span {
+    case Some(held) => held
+    case None => { return "" }
+  }
+  match (sources.get(item.moduleName), List.get(&span, 0), List.get(&span, 1)) {
+    case (Some(text), Some(start), Some(end)) => {
+      if start < 0 || end > text.length() { return "" }
+      text.slice(start, end).split("\n").filter(|line: Str| !line.trim().startsWith(DOC_LINE)).join("\n")
+    }
+    case _ => ""
+  }
 }
