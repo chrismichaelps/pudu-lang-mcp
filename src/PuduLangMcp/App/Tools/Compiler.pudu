@@ -10,6 +10,9 @@ import PuduLangMcp.Errors.ToolError as ToolError
 import PuduLangMcp.Services.Workspace as Workspace
 import PuduLangMcp.Utils.TextBounds as TextBounds
 
+/// What `pudu_expand` answers for code that derives nothing.
+const NOTHING_DERIVED: Str = "The code derives no implementations."
+
 /// Answers the compiler's diagnostics for the code.
 export fn check(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure] {
   onTarget(context, args, ["check"], Server.COMMAND_TIMEOUT_MS, fn(status: Int, said: Str) -> Str { said })
@@ -25,6 +28,14 @@ export fn format(context: &Context.Context, args: &Arguments.Args) -> Result[Str
 /// Answers the linter's findings for the code.
 export fn lint(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure] {
   onTarget(context, args, ["lint"], Server.COMMAND_TIMEOUT_MS, fn(status: Int, said: Str) -> Str { said })
+}
+
+/// Answers the implementations the code's derives generate, as Pudu, or the diagnostics that stop
+/// them.
+export fn expand(context: &Context.Context, args: &Arguments.Args) -> Result[Str, ToolError.ToolFailure] {
+  onTarget(context, args, ["expand"], Server.COMMAND_TIMEOUT_MS, fn(status: Int, said: Str) -> Str {
+      if status == 0 && said.isEmpty() { NOTHING_DERIVED } else { said }
+    })
 }
 
 /// Answers a confined run's exit status and output.

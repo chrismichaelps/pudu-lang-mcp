@@ -6,22 +6,65 @@ import Std.Test as Test
 import PuduLangMcp.Domain.Reference.Decode as Decode
 import PuduLangMcp.Domain.Reference.Entry as Entry
 
+/// The source the spans below point into.
+const SOURCE: Str = "module Std.Shape\n\n/// Ñandú.\nexport type Point = \{ x: Int, y: Int \} derives Order.Eq\n\nexport trait Named \{\n  /// The name.\n  fn named(self: &Self) -> Str\n\}\n"
+
+/// One `pudu doc --json` item.
+fn item(name: Str, kind: Str, signature: Str, span: Str) -> Str {
+  "\{\"name\":\"" + name + "\",\"kind\":\"" + kind + "\",\"module\":\"Std.Shape\",\"signature\":" + signature + ",\"shape\":null,\"doc\":[\"Doc of " + name + ".\"],\"span\":" + span + "\}"
+}
+
+/// The entries the items decode to under the exports, over `SOURCE`.
+fn decoded(items: &Array[Str], exported: &Array[Str]) -> Array[Entry.Entry] {
+  let api = "\{\"version\":\"0.1.3\",\"exports\":[" + exported.map(|name: Str| "\{\"module\":\"Std.Shape\",\"name\":\"" + name + "\"\}").join(",") + "]\}"
+  let exports = match Decode.exportsOf(api) { case Ok(names) => names case Err(_) => setOf([]) }
+  match Decode.entriesOf("\{\"entries\":[" + items.join(",") + "]\}", &exports, &mapOf([("Std.Shape", SOURCE)])) {
+    case Ok(found) => found
+    case Err(_) => []
+  }
+}
+
+/// The `kind name` of each entry.
+fn listed(entries: &Array[Entry.Entry]) -> Array[Str] { entries.map(|held: Entry.Entry| held.kind + " " + held.name) }
+
 /// Runs the suite.
 fn main() -> Int {
   let api = "\{\"version\":\"0.1.1\",\"exports\":[\{\"module\":\"Std.Io\",\"name\":\"read\"\}]\}"
   let doc = "\{\"entries\":[\{\"name\":\"read\",\"kind\":\"fn\",\"module\":\"Std.Io\",\"signature\":\"Str -> Result[Str, Str]\",\"doc\":[\"A file's text.\",\"Second line.\"]\},\{\"name\":\"helper\",\"kind\":\"fn\",\"module\":\"Std.Io\",\"signature\":\"Int\",\"doc\":[]\},\{\"name\":\"read\",\"kind\":\"fn\",\"module\":\"Std.Io\",\"signature\":\"Str -> Result[Str, Str]\",\"doc\":[\"A file's text.\",\"Second line.\"]\}]\}"
   let exports = match Decode.exportsOf(api) { case Ok(names) => names case Err(_) => setOf([]) }
-  let entries = match Decode.entriesOf(doc, &exports) { case Ok(found) => found case Err(_) => [] }
+  let entries = match Decode.entriesOf(doc, &exports, &mapOf([])) { case Ok(found) => found case Err(_) => [] }
+  let point = item("Point", "type", "null", "[36, 84]")
+  let named = item("Named", "trait", "null", "[93, 155]")
+  let traitMethod = item("named", "fn (trait Named)", "\"&Self -> Str\"", "[150, 155]")
+  let implemented = item("named", "fn (Int)", "\"&Int -> Str\"", "[0, 1]")
+  let typeMethod = item("x", "fn (Point)", "\"&Point -> Int\"", "[0, 1]")
+  let privateMethod = item("y", "fn (Hidden)", "\"&Hidden -> Int\"", "[0, 1]")
+  let both = decoded(&[point, named, traitMethod, implemented, typeMethod, privateMethod], &["Point", "Named"])
   let checks = Test.suite("Domain.Reference.Decode", &[
       Test.that("exports are qualified names", exports.contains("Std.Io.read")),
       Test.equals("only exported declarations are kept, each once", &entries.length(), &1),
       Test.equals("documentation lines are joined", &entries.map(|held: Entry.Entry| held.doc), &["A file's text.\nSecond line."]),
       Test.equals("the signature is kept", &entries.map(|held: Entry.Entry| held.signature), &["Str -> Result[Str, Str]"]),
+      Test.equals("trait methods, implementations of exported traits, and methods of exported types are kept", &listed(&both), &["type Point", "trait Named", "fn (trait Named) named", "fn (Int) named", "fn (Point) x"]),
+      Test.equals("a type takes its declaration, derives clause included, from its span", &both.map(|held: Entry.Entry| held.signature)[0], &"type Point = \{ x: Int, y: Int \} derives Order.Eq"),
+      Test.equals("a trait's declaration drops its doc comment lines", &both.map(|held: Entry.Entry| held.signature)[1], &"trait Named \{\n  fn named(self: &Self) -> Str\n\}"),
+      Test.equals("a method of a trait not exported is dropped", &listed(&decoded(&[traitMethod, implemented], &["Point"])), &[]),
+      Test.equals("a type's method is kept only when the type is exported", &listed(&decoded(&[typeMethod], &["Named"])), &[]),
+      Test.equals("a span past the text answers no declaration", &decoded(&[item("Point", "type", "null", "[36, 999]")], &["Point"]).map(|held: Entry.Entry| held.signature), &[""]),
+      Test.equals("a negative span answers no declaration", &decoded(&[item("Point", "type", "null", "[-1, 10]")], &["Point"]).map(|held: Entry.Entry| held.signature), &[""]),
+      Test.equals("an empty span answers no declaration", &decoded(&[item("Point", "type", "null", "[36, 36]")], &["Point"]).map(|held: Entry.Entry| held.signature), &[""]),
+      Test.equals("a span reaching the end of the text is read", &decoded(&[item("Point", "type", "null", "[154, 156]")], &["Point"]).map(|held: Entry.Entry| held.signature), &["\}\n"]),
+      Test.equals("a span starting at the text's first character is read", &decoded(&[item("Point", "type", "null", "[0, 6]")], &["Point"]).map(|held: Entry.Entry| held.signature), &["module"]),
+      Test.equals("a kind opening an owner it never closes names no owner", &listed(&decoded(&[traitMethod, item("named", "fn (Int", "\"&Int -> Str\"", "[0, 1]")], &["Named"])), &["fn (trait Named) named"]),
+      Test.equals("a span that is not a pair answers no declaration", &decoded(&[item("Point", "type", "null", "[36]")], &["Point"]).map(|held: Entry.Entry| held.signature), &[""]),
+      Test.equals("an item without a span answers no declaration", &decoded(&[item("Point", "type", "null", "null")], &["Point"]).map(|held: Entry.Entry| held.signature), &[""]),
+      Test.equals("a module without source answers no declaration", &match Decode.entriesOf("\{\"entries\":[" + point + "]\}", &setOf(["Std.Shape.Point"]), &mapOf([])) { case Ok(found) => found.map(|held: Entry.Entry| held.signature) case Err(_) => ["refused"] }, &[""]),
       Test.errored("api output that is not JSON is refused", &Decode.exportsOf("not json")),
       Test.errored("api output without exports is refused", &Decode.exportsOf("\{\}")),
-      Test.errored("doc output that is not JSON is refused", &Decode.entriesOf("\{\"entries\":[", &exports)),
-      Test.errored("doc output without entries is refused", &Decode.entriesOf("\{\"other\":1\}", &exports)),
-      Test.equals("nothing exported keeps nothing", &match Decode.entriesOf(doc, &setOf([])) { case Ok(found) => found.length() case Err(_) => -1 }, &0)
+      Test.errored("doc output that is not JSON is refused", &Decode.entriesOf("\{\"entries\":[", &exports, &mapOf([]))),
+      Test.errored("doc output without entries is refused", &Decode.entriesOf("\{\"other\":1\}", &exports, &mapOf([]))),
+      Test.errored("an item without its module is refused", &Decode.entriesOf("\{\"entries\":[\{\"name\":\"x\",\"kind\":\"fn\",\"doc\":[]\}]\}", &exports, &mapOf([]))),
+      Test.equals("nothing exported keeps nothing", &match Decode.entriesOf(doc, &setOf([]), &mapOf([])) { case Ok(found) => found.length() case Err(_) => -1 }, &0)
     ])
   let ran = Test.run(&checks)
   for failure in Test.failuresOf(&ran) {

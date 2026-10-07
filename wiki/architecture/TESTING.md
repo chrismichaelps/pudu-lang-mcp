@@ -27,4 +27,4 @@ resolved by a regression test or removal of redundant logic.
 
 ## Referenced by
 
-[[architecture/_MOC]]
+[[architecture/_MOC]] · [[handoffs/2026-10-07-pudu-0-1-3]]

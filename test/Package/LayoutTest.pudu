@@ -6,6 +6,7 @@ import Std.List as List
 import Std.Result as Result
 import Std.Test as Test
 import Std.Text as Text
+import PuduLangMcp.Constants.Server as Server
 
 /// The module root the manifest declares.
 const ROOT: Str = "PuduLangMcp"
@@ -56,6 +57,7 @@ fn main() -> Int {
       Test.equals("every shipped module is under the package root", &outside, &[]),
       Test.equals("every module is named after its path", &misnamed, &[]),
       Test.that("the manifest declares the same root", manifest.contains("root = \"" + ROOT + "\"")),
+      Test.that("the server reports the manifest's version", manifest.contains("version = \"" + Server.SERVER_VERSION + "\"")),
       Test.equals("the entry stays the executable's Main", &declared(ENTRY), &"Main"),
       Test.that("a name beside the root is refused", !owned("App.Context") && !owned("PuduLangMcpExtra")),
       Test.that("the root and its children are owned", owned(ROOT) && owned(ROOT + ".App.Context"))
